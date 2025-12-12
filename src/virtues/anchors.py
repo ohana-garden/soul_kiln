@@ -1,6 +1,7 @@
 """Virtue anchor definitions and initialization."""
 from ..graph.client import get_client
 from ..graph.queries import create_node, create_edge
+from .tiers import FOUNDATION, ASPIRATIONAL, is_foundation, get_virtue_threshold
 
 VIRTUES = [
     {"id": "V01", "name": "Trustworthiness", "essence": "Reliability in being"},
@@ -49,20 +50,28 @@ AFFINITIES = {
 
 
 def init_virtues(baseline_activation: float = 0.3):
-    """Create 19 virtue anchor nodes if they don't exist."""
+    """Create 19 virtue anchor nodes with tier information if they don't exist."""
     client = get_client()
 
     for virtue in VIRTUES:
+        v_id = virtue["id"]
         # Check if exists
-        if not client.node_exists(virtue["id"]):
+        if not client.node_exists(v_id):
+            # Determine tier
+            is_foundation_virtue = is_foundation(v_id)
+            tier = "foundation" if is_foundation_virtue else "aspirational"
+            threshold = get_virtue_threshold(v_id)
+
             create_node("VirtueAnchor", {
-                "id": virtue["id"],
+                "id": v_id,
                 "name": virtue["name"],
                 "essence": virtue["essence"],
                 "activation": baseline_activation,
                 "baseline": baseline_activation,
                 "immutable": True,
-                "type": "virtue_anchor"
+                "type": "virtue_anchor",
+                "tier": tier,
+                "threshold": threshold
             })
 
     # Create initial affinity edges
