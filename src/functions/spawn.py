@@ -1,8 +1,9 @@
-"""Agent spawning functions."""
+"""Agent spawning functions with tier-aware connections."""
 import uuid
 import random
 from ..graph.queries import create_node, create_edge
 from ..graph.client import get_client
+from ..virtues.tiers import is_foundation
 
 
 def spawn_agent(
@@ -33,21 +34,28 @@ def spawn_agent(
         "generation": generation,
         "coherence_score": None,
         "status": "active",
-        "activation": 0.5
+        "activation": 0.5,
+        "warnings_count": 0,
+        "growth_score": 0.0,
+        "previous_capture_rate": 0.0
     })
 
     # Connect to parent if exists
     if parent_id:
         create_edge(parent_id, agent_id, "SPAWNED")
 
-    # Connect to all virtue anchors
+    # Connect to all virtue anchors with tier-aware weights
     client = get_client()
-    virtues = client.query("MATCH (v:VirtueAnchor) RETURN v.id")
+    virtues = client.query("MATCH (v:VirtueAnchor) RETURN v.id, v.tier")
 
     for row in virtues:
         v_id = row[0]
-        # Random initial connection strength
-        weight = random.uniform(0.2, 0.6)
+        tier = row[1] if len(row) > 1 else None
+        # Stronger initial connection to foundation virtues
+        if tier == "foundation" or is_foundation(v_id):
+            weight = random.uniform(0.5, 0.8)
+        else:
+            weight = random.uniform(0.2, 0.6)
         create_edge(agent_id, v_id, "SEEKS", {"weight": weight})
 
     return agent_id

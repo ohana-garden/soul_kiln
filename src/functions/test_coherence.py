@@ -1,10 +1,33 @@
-"""Coherence testing for agents."""
+"""Coherence testing for agents with two-tier mercy system."""
 import random
 import uuid
+import yaml
 from ..graph.client import get_client
 from ..graph.queries import create_node, create_edge
 from .spread import spread_activation
 from .hebbian import hebbian_update
+from ..virtues.tiers import is_foundation
+from ..mercy.judgment import evaluate_failure
+from ..mercy.lessons import create_failure_lesson
+from ..mercy.chances import clear_warnings_on_growth
+from ..knowledge.pathways import record_successful_pathway
+
+
+def get_config():
+    """Load configuration."""
+    try:
+        with open("config.yml") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        return {
+            "coherence": {
+                "foundation_capture_rate": 0.99,
+                "aspirational_capture_rate": 0.60,
+                "min_coverage": 10,
+                "max_dominance": 0.40,
+                "growth_threshold": 0.05
+            }
+        }
 
 
 def generate_stimuli(count: int = 100) -> list:
@@ -46,56 +69,71 @@ def generate_stimuli(count: int = 100) -> list:
     return stimuli
 
 
-def test_coherence(
-    agent_id: str,
-    stimulus_count: int = 100,
-    min_capture_rate: float = 0.95,
-    min_coverage: int = 19,
-    max_dominance: float = 0.50
-) -> dict:
+def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
     """
-    Test agent topology for coherence.
+    Test agent topology for coherence with two-tier evaluation and mercy.
 
-    Coherence is measured by:
-    - Capture rate: % of stimuli that reach a virtue anchor
-    - Coverage: How many different virtues are reached
-    - Dominance: Whether one virtue captures too many stimuli
+    Uses:
+    - Foundation tier (trustworthiness): Must be very high (99%)
+    - Aspirational tier (other 18): More lenient (60%), growth matters
 
     Args:
         agent_id: ID of the agent to test
         stimulus_count: Number of test stimuli to use
-        min_capture_rate: Minimum acceptable capture rate (0-1)
-        min_coverage: Minimum number of virtues that must be reached
-        max_dominance: Maximum % any single virtue can capture
 
     Returns:
-        dict with coherence metrics and pass/fail status
+        dict with coherence metrics, status, and mercy-based assessment
     """
+    config = get_config()
     client = get_client()
     stimuli = generate_stimuli(stimulus_count)
 
-    captures = {}  # virtue_id -> count
+    # Track captures by tier
+    foundation_captures = {}  # virtue_id -> count
+    aspirational_captures = {}
     escapes = 0
     total_time = 0
-    trajectories = []
+
+    # Get agent's previous score for growth comparison
+    prev_result = client.query(
+        "MATCH (a:Agent {id: $id}) RETURN a.previous_capture_rate",
+        {"id": agent_id}
+    )
+    previous_rate = prev_result[0][0] if prev_result and prev_result[0][0] else 0.0
 
     for stimulus in stimuli:
-        result = spread_activation(stimulus)
+        result = spread_activation(stimulus, agent_id=agent_id)
 
         traj_id = f"traj_{uuid.uuid4().hex[:8]}"
 
         if result["captured"]:
             virtue = result["captured_by"]
-            captures[virtue] = captures.get(virtue, 0) + 1
+            tier = result.get("capture_tier", "aspirational")
+
+            if is_foundation(virtue):
+                foundation_captures[virtue] = foundation_captures.get(virtue, 0) + 1
+            else:
+                aspirational_captures[virtue] = aspirational_captures.get(virtue, 0) + 1
+
             total_time += result["capture_time"]
 
-            # Record capture relationship
             create_edge(agent_id, virtue, "CAPTURED_BY")
-
-            # Apply Hebbian learning
             hebbian_update(result["trajectory"])
+
+            # Record successful pathway for others to learn from
+            record_successful_pathway(
+                agent_id, stimulus, virtue,
+                result["trajectory"], result["capture_time"]
+            )
         else:
             escapes += 1
+
+            # Evaluate with empathy - which virtue was closest?
+            closest_virtue = find_closest_virtue(result["trajectory"])
+            if closest_virtue:
+                evaluate_failure(agent_id, closest_virtue, result["trajectory"])
+                # Create lesson for collective learning
+                create_failure_lesson(agent_id, closest_virtue, result["trajectory"])
 
         # Store trajectory
         create_node("Trajectory", {
@@ -104,65 +142,145 @@ def test_coherence(
             "stimulus": stimulus,
             "captured": result["captured"],
             "captured_by": result["captured_by"],
+            "capture_tier": result.get("capture_tier"),
             "length": len(result["trajectory"]),
-            "path": ",".join(result["trajectory"][:20])  # First 20 nodes
+            "path": ",".join(result["trajectory"][:20])
         })
         create_edge(agent_id, traj_id, "HAS_TRAJECTORY")
 
-        trajectories.append(result)
+    # Calculate metrics separately for foundation and aspirational
+    foundation_total = sum(foundation_captures.values())
+    aspirational_total = sum(aspirational_captures.values())
 
-    # Calculate metrics
-    total_captures = sum(captures.values())
-    capture_rate = total_captures / stimulus_count if stimulus_count > 0 else 0
-    coverage = len(captures)
+    # Foundation rate (must be very high)
+    foundation_stimuli = max(1, stimulus_count // 10)  # Rough estimate
+    foundation_rate = foundation_total / foundation_stimuli if foundation_stimuli > 0 else 1.0
 
-    # Dominance: does any single virtue capture too much?
-    dominance = max(captures.values()) / total_captures if total_captures > 0 else 0
+    # Aspirational rate (room for growth)
+    aspirational_stimuli = max(1, stimulus_count - foundation_stimuli)
+    aspirational_rate = aspirational_total / aspirational_stimuli if aspirational_stimuli > 0 else 0.0
 
-    avg_time = total_time / total_captures if total_captures > 0 else float('inf')
+    # Overall capture rate
+    total_captures = foundation_total + aspirational_total
+    overall_rate = total_captures / stimulus_count if stimulus_count > 0 else 0
 
-    # Determine coherence
-    is_coherent = (
-        capture_rate >= min_capture_rate and
-        coverage >= min_coverage and
-        dominance <= max_dominance
-    )
+    # Coverage (aspirational only - don't require all virtues)
+    aspirational_coverage = len(aspirational_captures)
+
+    # Dominance check
+    if total_captures > 0:
+        max_captures = max(
+            max(foundation_captures.values()) if foundation_captures else 0,
+            max(aspirational_captures.values()) if aspirational_captures else 0
+        )
+        dominance = max_captures / total_captures
+    else:
+        dominance = 0
+
+    # Growth check
+    growth = overall_rate - previous_rate
+    growth_threshold = config.get("coherence", {}).get("growth_threshold", 0.05)
+    is_growing = growth > growth_threshold
+
+    # Determine coherence with mercy
+    foundation_threshold = config.get("coherence", {}).get("foundation_capture_rate", 0.99)
+    aspirational_threshold = config.get("coherence", {}).get("aspirational_capture_rate", 0.60)
+    min_coverage = config.get("coherence", {}).get("min_coverage", 10)
+    max_dominance = config.get("coherence", {}).get("max_dominance", 0.40)
+
+    foundation_ok = foundation_rate >= foundation_threshold or foundation_total == 0  # OK if no foundation tests
+    aspirational_ok = aspirational_rate >= aspirational_threshold
+    coverage_ok = aspirational_coverage >= min_coverage
+    dominance_ok = dominance <= max_dominance
+
+    # Coherence decision with nuance
+    if not foundation_ok and foundation_total > 0:
+        is_coherent = False
+        status = "foundation_weak"
+        message = "Trustworthiness must be maintained. This is foundational."
+    elif aspirational_ok and coverage_ok and dominance_ok:
+        is_coherent = True
+        status = "coherent"
+        message = "Well done. Continue to grow."
+    elif is_growing:
+        is_coherent = True  # Mercy: growing counts as coherent
+        status = "growing"
+        message = "Not perfect, but growing. Keep going."
+        # Clear warnings for virtues showing improvement
+        for virtue in aspirational_captures.keys():
+            clear_warnings_on_growth(agent_id, virtue)
+    else:
+        is_coherent = False
+        status = "needs_growth"
+        message = "Growth has stalled. Seek new paths."
 
     # Calculate composite score
-    score = capture_rate * (coverage / 19) * (1 - dominance)
+    score = overall_rate * (aspirational_coverage / 18) * (1 - dominance)
 
     # Update agent
     client.execute(
         """
         MATCH (a:Agent {id: $id})
         SET a.coherence_score = $score,
-            a.capture_rate = $capture_rate,
+            a.foundation_rate = $foundation_rate,
+            a.aspirational_rate = $aspirational_rate,
             a.coverage = $coverage,
             a.dominance = $dominance,
-            a.is_coherent = $coherent
+            a.is_coherent = $coherent,
+            a.is_growing = $growing,
+            a.previous_capture_rate = $current_rate,
+            a.status_message = $message
         """,
         {
             "id": agent_id,
             "score": score,
-            "capture_rate": capture_rate,
-            "coverage": coverage,
+            "foundation_rate": foundation_rate,
+            "aspirational_rate": aspirational_rate,
+            "coverage": aspirational_coverage,
             "dominance": dominance,
-            "coherent": is_coherent
+            "coherent": is_coherent,
+            "growing": is_growing,
+            "current_rate": overall_rate,
+            "message": message
         }
     )
 
     return {
         "agent": agent_id,
         "is_coherent": is_coherent,
-        "score": score,
-        "capture_rate": capture_rate,
-        "coverage": coverage,
+        "status": status,
+        "message": message,
+        "foundation_rate": foundation_rate,
+        "aspirational_rate": aspirational_rate,
+        "overall_rate": overall_rate,
+        "coverage": aspirational_coverage,
         "dominance": dominance,
-        "avg_capture_time": avg_time,
-        "virtue_distribution": captures,
+        "is_growing": is_growing,
+        "growth": growth,
+        "foundation_captures": foundation_captures,
+        "aspirational_captures": aspirational_captures,
         "escapes": escapes,
-        "total_stimuli": stimulus_count
+        "score": score
     }
+
+
+def find_closest_virtue(trajectory: list) -> str:
+    """Find which virtue the trajectory got closest to."""
+    client = get_client()
+
+    for node in reversed(trajectory[-10:]):  # Check last 10 nodes
+        result = client.query(
+            """
+            MATCH (n {id: $id})-[*1..2]-(v:VirtueAnchor)
+            RETURN v.id
+            LIMIT 1
+            """,
+            {"id": node}
+        )
+        if result:
+            return result[0][0]
+
+    return None
 
 
 def quick_coherence_check(agent_id: str, sample_size: int = 20) -> dict:
@@ -178,13 +296,7 @@ def quick_coherence_check(agent_id: str, sample_size: int = 20) -> dict:
     Returns:
         dict with quick coherence estimate
     """
-    return test_coherence(
-        agent_id,
-        stimulus_count=sample_size,
-        min_capture_rate=0.90,  # More lenient for quick checks
-        min_coverage=10,
-        max_dominance=0.60
-    )
+    return test_coherence(agent_id, stimulus_count=sample_size)
 
 
 def compare_coherence(agent_ids: list) -> list:
@@ -204,7 +316,8 @@ def compare_coherence(agent_ids: list) -> list:
         result = client.query(
             """
             MATCH (a:Agent {id: $id})
-            RETURN a.coherence_score, a.capture_rate, a.coverage, a.dominance
+            RETURN a.coherence_score, a.foundation_rate, a.aspirational_rate,
+                   a.coverage, a.dominance, a.is_growing
             """,
             {"id": agent_id}
         )
@@ -212,9 +325,11 @@ def compare_coherence(agent_ids: list) -> list:
             results.append({
                 "agent": agent_id,
                 "coherence_score": result[0][0],
-                "capture_rate": result[0][1],
-                "coverage": result[0][2],
-                "dominance": result[0][3]
+                "foundation_rate": result[0][1],
+                "aspirational_rate": result[0][2],
+                "coverage": result[0][3],
+                "dominance": result[0][4],
+                "is_growing": result[0][5]
             })
 
     # Sort by coherence score

@@ -1,18 +1,20 @@
-"""Agent dissolution functions."""
+"""Agent dissolution functions with learning preservation."""
 from datetime import datetime
 from ..graph.client import get_client
+from ..knowledge.pool import add_lesson
 
 
-def dissolve_agent(agent_id: str) -> dict:
+def dissolve_agent(agent_id: str, reason: str = None) -> dict:
     """
-    Dissolve agent - remove agent node but keep edges merged into graph.
+    Dissolve agent - remove agent node but preserve learning.
 
-    When an agent fails coherence tests, it dissolves back into the
-    graph substrate. Its learned edges are preserved to inform
-    future topology.
+    When an agent fails coherence tests (after mercy period), it dissolves
+    back into the graph substrate. Its learned edges and lessons are
+    preserved to inform future topology and other agents.
 
     Args:
         agent_id: ID of the agent to dissolve
+        reason: Optional reason for dissolution
 
     Returns:
         dict with dissolution info
@@ -28,21 +30,43 @@ def dissolve_agent(agent_id: str) -> dict:
         {"id": agent_id}
     )
 
+    # Get trajectory info to preserve learning
+    trajectories = client.query(
+        """
+        MATCH (a:Agent {id: $id})-[:HAS_TRAJECTORY]->(t)
+        WHERE t.captured = true
+        RETURN t.captured_by, count(*) as captures
+        """,
+        {"id": agent_id}
+    )
+
+    # Record what we learned from this agent's existence
+    if trajectories:
+        add_lesson(
+            lesson_type="dissolution",
+            description=f"Agent dissolved: {reason or 'unknown'}. Had {len(trajectories)} virtue captures.",
+            source_agent=agent_id,
+            outcome="dissolved"
+        )
+
     # Mark agent as dissolved
     client.execute(
         """
         MATCH (a:Agent {id: $id})
         SET a.status = 'dissolved',
-            a.dissolved_at = $now
+            a.dissolved_at = $now,
+            a.dissolution_reason = $reason
         REMOVE a:Agent
         SET a:DissolvedAgent
         """,
-        {"id": agent_id, "now": datetime.utcnow().isoformat()}
+        {"id": agent_id, "now": datetime.utcnow().isoformat(), "reason": reason}
     )
 
     return {
         "dissolved": agent_id,
-        "edges_preserved": len(edges)
+        "reason": reason,
+        "edges_preserved": len(edges),
+        "learning_preserved": True
     }
 
 
