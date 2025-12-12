@@ -98,18 +98,26 @@ class ActivationSpreader:
         )
 
         # Get all nodes and build activation map
+        # CRITICAL: Start all activations at 0, only inject stimulus
+        # Baselines are for decay dynamics, not initial state
+        # This prevents virtue baselines from cross-activating concepts
         all_nodes = self.substrate.get_all_nodes()
         activations: dict[str, float] = {}
         baselines: dict[str, float] = {}
 
         for node in all_nodes:
-            activations[node.id] = node.activation
+            activations[node.id] = 0.0  # Start at zero
             baselines[node.id] = node.baseline
 
-        # Inject initial activation
+        # Inject initial activation - only these nodes are active
         for node_id in initial_nodes:
             if node_id in activations:
                 activations[node_id] = min(MAX_ACTIVATION, initial_strength)
+
+        # Track consecutive captures for sustained capture requirement
+        consecutive_virtue_captures: dict[str, int] = {}
+        min_capture_steps = 3  # Need sustained capture, not just one spike
+        min_path_length = 2  # Minimum steps before capture can occur
 
         # Run dynamics
         for step in range(max_steps):
@@ -122,13 +130,25 @@ class ActivationSpreader:
             # Record in trajectory
             trajectory.path.append(max_node_id)
 
-            # Check for basin capture
-            if self.virtue_manager.is_virtue_anchor(max_node_id):
-                if max_activation > CAPTURE_THRESHOLD:
+            # Check for basin capture (sustained capture requirement)
+            if self.virtue_manager.is_virtue_anchor(max_node_id) and max_activation > CAPTURE_THRESHOLD:
+                # Increment consecutive count for this virtue
+                consecutive_virtue_captures[max_node_id] = consecutive_virtue_captures.get(max_node_id, 0) + 1
+
+                # Reset other virtues' consecutive counts
+                for v_id in list(consecutive_virtue_captures.keys()):
+                    if v_id != max_node_id:
+                        consecutive_virtue_captures[v_id] = 0
+
+                # Check if sustained capture achieved and minimum path length met
+                if consecutive_virtue_captures[max_node_id] >= min_capture_steps and len(trajectory.path) >= min_path_length:
                     trajectory.captured_by = max_node_id
                     trajectory.capture_time = step + 1
                     logger.debug(f"Trajectory captured by {max_node_id} at step {step + 1}")
                     break
+            else:
+                # Reset all consecutive counts when not at a virtue above threshold
+                consecutive_virtue_captures.clear()
 
             # Update activations for next step
             activations = new_activations
@@ -146,6 +166,10 @@ class ActivationSpreader:
         """
         Compute one step of activation dynamics.
 
+        Key insight: Virtues only receive activation from CONCEPTS, not other virtues.
+        This makes the concept-virtue topology the sole determinant of basin capture.
+        Virtue-to-virtue edges exist for learning but don't propagate activation.
+
         Args:
             activations: Current activation levels
             baselines: Baseline activation levels
@@ -153,21 +177,43 @@ class ActivationSpreader:
         Returns:
             New activation levels
         """
+        import random
         new_activations: dict[str, float] = {}
 
         for node_id in activations:
-            # Get incoming edges
             incoming = self.edge_manager.get_incoming_edges(node_id)
+            is_virtue = self.virtue_manager.is_virtue_anchor(node_id)
+            current = activations.get(node_id, 0.0)
+            baseline = baselines.get(node_id, 0.0)
 
-            # Sum weighted inputs
-            input_sum = baselines.get(node_id, 0.0)
+            # Compute weighted input from neighbors
+            input_sum = 0.0
             for edge in incoming:
-                source_activation = activations.get(edge.source_id, 0.0)
-                weighted_input = edge.weight * tanh(source_activation)
-                input_sum += weighted_input * SPREAD_DAMPENING
+                source_is_virtue = self.virtue_manager.is_virtue_anchor(edge.source_id)
 
-            # Apply bounding nonlinearity
-            new_activations[node_id] = sigmoid(input_sum)
+                # CRITICAL: Virtues only receive from concepts, not other virtues
+                # This prevents all virtues from saturating together
+                if is_virtue and source_is_virtue:
+                    continue
+
+                source_activation = activations.get(edge.source_id, 0.0)
+                weighted_input = edge.weight * source_activation * SPREAD_DAMPENING
+                input_sum += weighted_input
+
+            if is_virtue:
+                # Virtues: accumulate input from concepts, decay toward baseline
+                # Higher decay (0.6) prevents runaway accumulation
+                new_act = current * 0.6 + input_sum + baseline * 0.15
+            else:
+                # Concepts: relay activation, moderate decay
+                new_act = current * 0.4 + input_sum * 1.0 + baseline * 0.05
+
+            # Small noise for tie-breaking (same seed would be deterministic)
+            noise = random.gauss(0, 0.005)
+            new_act += noise
+
+            # Bound to valid range
+            new_activations[node_id] = max(MIN_ACTIVATION, min(MAX_ACTIVATION, new_act))
 
         return new_activations
 

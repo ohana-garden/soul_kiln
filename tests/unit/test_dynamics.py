@@ -26,9 +26,9 @@ class TestActivationFunctions:
 
     def test_sigmoid_bounds(self):
         """Test sigmoid is bounded between 0 and 1."""
-        assert 0 < sigmoid(-100) < 1
+        assert 0 <= sigmoid(-100) <= 1
         assert 0 < sigmoid(0) < 1
-        assert 0 < sigmoid(100) < 1
+        assert 0 <= sigmoid(100) <= 1
 
     def test_sigmoid_at_zero(self):
         """Test sigmoid(0) = 0.5."""

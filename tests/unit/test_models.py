@@ -47,11 +47,14 @@ class TestNode:
         assert node.metadata["name"] == "test"
 
     def test_activation_bounds(self):
-        """Test activation is bounded."""
-        node = Node(id="test", type=NodeType.CONCEPT, activation=1.5)
-        # Pydantic should clamp or reject
-        # Note: depends on validation mode
-        assert node.activation <= 1.0 or node.activation == 1.5  # Field not clamped by default
+        """Test activation is bounded by Pydantic validation."""
+        # Pydantic should reject activation > 1.0
+        with pytest.raises(Exception):  # ValidationError
+            Node(id="test", type=NodeType.CONCEPT, activation=1.5)
+
+        # Valid activation should work
+        node = Node(id="test", type=NodeType.CONCEPT, activation=0.8)
+        assert node.activation == 0.8
 
 
 class TestEdge:
