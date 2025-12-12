@@ -33,6 +33,13 @@ ASPIRATIONAL = {
     "V19": {"name": "Service", "essence": "Active contribution"},
 }
 
+# The judgment lens - how agents evaluate each other
+JUDGMENT_LENS = {
+    "empathy": "understand WHY the other agent failed",
+    "mercy": "give chances, don't dissolve on first failure",
+    "kindness": "correct gently, teach rather than punish"
+}
+
 
 def is_foundation(virtue_id: str) -> bool:
     """Check if a virtue is foundational (absolute requirement)."""
@@ -50,7 +57,7 @@ def get_all_virtues() -> dict:
 
 
 def get_virtue_tier(virtue_id: str) -> str:
-    """Get the tier of a virtue."""
+    """Get the tier of a virtue ('foundation' or 'aspirational')."""
     if virtue_id in FOUNDATION:
         return "foundation"
     elif virtue_id in ASPIRATIONAL:
@@ -63,3 +70,20 @@ def get_tier_threshold(tier: str) -> float:
     if tier == "foundation":
         return 0.99
     return 0.60
+
+
+def get_virtue_threshold(virtue_id: str) -> float:
+    """Get the coherence threshold for a virtue based on its tier."""
+    if virtue_id in FOUNDATION:
+        return FOUNDATION[virtue_id].get("threshold", 0.99)
+    return 0.60
+
+
+def get_foundation_ids() -> list:
+    """Get list of all foundation virtue IDs."""
+    return list(FOUNDATION.keys())
+
+
+def get_aspirational_ids() -> list:
+    """Get list of all aspirational virtue IDs."""
+    return list(ASPIRATIONAL.keys())

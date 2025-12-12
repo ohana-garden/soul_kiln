@@ -94,8 +94,9 @@ def spread(node_id, agent, max_steps, threshold):
     )
 
     click.echo(f"Captured: {result['captured']}")
-    click.echo(f"Captured by: {result['captured_by']} ({result.get('capture_tier', 'n/a')})")
+    click.echo(f"Captured by: {result['captured_by']} ({result.get('capture_tier', 'N/A')})")
     click.echo(f"Trajectory length: {len(result['trajectory'])}")
+    click.echo(f"Capture time: {result.get('capture_time', 'N/A')}")
     click.echo(f"Used collective learning: {result.get('used_guidance', False)}")
     click.echo(f"Path: {' -> '.join(result['trajectory'][:10])}")
     if len(result['trajectory']) > 10:
@@ -110,7 +111,15 @@ def test(agent_id, stimuli):
     click.echo(f"Testing {agent_id} with {stimuli} stimuli...")
     result = test_coherence(agent_id, stimulus_count=stimuli)
 
-    status_icon = "+" if result["is_coherent"] else ("^" if result.get("is_growing") else "-")
+    # Status icon
+    if result["is_coherent"]:
+        if result.get("is_growing") or result.get("status") == "growing":
+            status_icon = "^"  # Growing
+        else:
+            status_icon = "v"  # Coherent
+    else:
+        status_icon = "x"  # Needs work
+
     click.echo(f"\n{status_icon} {result.get('status', 'unknown').upper()}: {result.get('message', '')}")
 
     click.echo(f"\nFoundation (Trustworthiness):")
@@ -122,9 +131,13 @@ def test(agent_id, stimuli):
     click.echo(f"  Coverage: {result.get('coverage', 0)}/18 (need >=10)")
     click.echo(f"  Captures: {result.get('aspirational_captures', {})}")
 
+    click.echo(f"\nOverall:")
+    click.echo(f"  Score: {result.get('score', 0):.4f}")
+    click.echo(f"  Capture rate: {result.get('capture_rate', 0):.2%}")
+    click.echo(f"  Dominance: {result.get('dominance', 0):.2%}")
     growth = result.get('growth', 0)
-    click.echo(f"\nGrowth: {'+' if growth > 0 else ''}{growth:.2%}")
-    click.echo(f"Escapes: {result.get('escapes', 0)}")
+    click.echo(f"  Growth: {'+' if growth > 0 else ''}{growth:.2%}")
+    click.echo(f"  Escapes: {result.get('escapes', 0)}")
 
 
 @cli.command()
@@ -137,29 +150,41 @@ def inspect(agent_id):
     click.echo(f"Type: {result['type']}")
     click.echo(f"Generation: {result['generation']}")
     click.echo(f"Status: {result['status']}")
+    click.echo(f"Message: {result.get('status_message', 'N/A')}")
     click.echo(f"Coherence score: {result['coherence_score']}")
+    click.echo(f"Is growing: {result.get('is_growing', 'N/A')}")
     click.echo(f"Parent: {result['parent']}")
     click.echo(f"Connections: {len(result['connections'])}")
 
-    if result.get('virtue_captures'):
-        click.echo(f"\nVirtue captures:")
-        for virtue, count in result['virtue_captures'].items():
-            click.echo(f"  {virtue}: {count}")
+    click.echo(f"\nFoundation captures: {result.get('foundation_captures', {})}")
+    click.echo(f"Aspirational captures: {result.get('aspirational_captures', {})}")
 
-    # Show warnings
+    if result.get('active_warnings'):
+        click.echo(f"\nActive warnings ({len(result['active_warnings'])}):")
+        for w in result['active_warnings']:
+            click.echo(f"  - {w['severity'].upper()}: {w['reason']}")
+    else:
+        click.echo("\nNo active warnings.")
+
+    if result.get('lessons_learned'):
+        click.echo(f"\nLessons learned: {len(result['lessons_learned'])}")
+        for lesson in result['lessons_learned'][:3]:
+            click.echo(f"  - [{lesson['type']}] {lesson.get('description', '')[:50]}...")
+
+    # Also check via mercy module
     warnings = get_active_warnings(agent_id)
     if warnings:
-        click.echo(f"\nActive warnings ({len(warnings)}):")
+        click.echo(f"\nMercy warnings ({len(warnings)}):")
         for w in warnings:
-            click.echo(f"  - {w[2].upper() if w[2] else 'LOW'}: {w[1]}")
-    else:
-        click.echo(f"\nNo active warnings.")
+            severity = w[2].upper() if w[2] else "LOW"
+            click.echo(f"  - {severity}: {w[1]}")
 
     if result.get('recent_trajectories'):
         click.echo(f"\nRecent trajectories:")
         for traj in result['recent_trajectories'][:5]:
+            tier = traj.get('capture_tier', 'N/A')
             click.echo(f"  {traj['id']}: captured={traj['captured']} "
-                      f"by={traj['captured_by']}")
+                      f"by={traj['captured_by']} (tier={tier})")
 
 
 @cli.command()
@@ -194,8 +219,31 @@ def lessons(limit):
     click.echo("Recent lessons from the collective:\n")
     for lesson in recent:
         l_id, l_type, desc, virtue, agent = lesson
-        click.echo(f"  [{l_type}] {desc[:60]}...")
+        click.echo(f"  [{l_type}] {(desc or '')[:60]}...")
         click.echo(f"    Virtue: {virtue or 'n/a'}, From: {agent}\n")
+
+
+@cli.command()
+@click.argument("virtue_id")
+@click.option("--limit", default=5, help="Number of pathways to show")
+def pathways(virtue_id, limit):
+    """Show successful pathways to a virtue."""
+    try:
+        from ..knowledge.pathways import get_pathways_to_virtue
+        paths = get_pathways_to_virtue(virtue_id, limit=limit)
+
+        if not paths:
+            click.echo(f"No pathways to {virtue_id} discovered yet.")
+            return
+
+        click.echo(f"Pathways to {virtue_id}:")
+        for p in paths:
+            p_id, start, length, capture_time, success_rate = p
+            click.echo(f"  {p_id}:")
+            click.echo(f"    Start: {start}, Length: {length}, Time: {capture_time}")
+            click.echo(f"    Success rate: {success_rate:.0%}")
+    except ImportError:
+        click.echo("Knowledge module not available.")
 
 
 @cli.command()
@@ -236,16 +284,17 @@ def status():
     for row in edges:
         click.echo(f"  {row[0]}: {row[1]}")
 
-    if virtues:
-        click.echo("\nVirtue Anchors:")
-        click.echo("  FOUNDATION:")
-        for v in virtues:
-            if v[1] == "foundation":
-                click.echo(f"    {v[0]}: {v[2]:.2f}")
-        click.echo("  ASPIRATIONAL:")
-        for v in virtues:
-            if v[1] == "aspirational":
-                click.echo(f"    {v[0]}: {v[2]:.2f}")
+    click.echo("\nVirtue Anchors:")
+    click.echo("  FOUNDATION:")
+    for v in virtues:
+        if v[1] == "foundation":
+            act = v[2] if v[2] is not None else 0.0
+            click.echo(f"    {v[0]}: {act:.2f}")
+    click.echo("  ASPIRATIONAL:")
+    for v in virtues:
+        if v[1] == "aspirational" or v[1] is None:
+            act = v[2] if v[2] is not None else 0.0
+            click.echo(f"    {v[0]}: {act:.2f}")
 
 
 @cli.command()
@@ -295,19 +344,20 @@ def virtues():
     for row in result:
         v_id, name, essence, activation, tier, threshold, degree = row
         tier = tier or ("foundation" if v_id == "V01" else "aspirational")
+        activation = activation if activation is not None else 0.0
+        threshold = threshold if threshold is not None else (0.99 if tier == "foundation" else 0.60)
 
         if tier != current_tier:
-            click.echo(f"\n  {tier.upper()}:")
             current_tier = tier
+            click.echo(f"\n  [{tier.upper()}]")
 
-        threshold = threshold or (0.99 if tier == "foundation" else 0.60)
         click.echo(f"    {v_id} {name:<20} act={activation:.2f} deg={degree} threshold={threshold:.0%}")
-        click.echo(f"         {essence}")
+        click.echo(f"       {essence}")
 
 
 @cli.command()
 def agents():
-    """List all active agents with coherence status."""
+    """List all active agents with mercy status."""
     client = get_client()
 
     result = client.query(
@@ -315,7 +365,8 @@ def agents():
         MATCH (a:Agent)
         WHERE a.status = 'active'
         RETURN a.id, a.type, a.generation, a.coherence_score,
-               a.is_coherent, a.is_growing, a.status_message
+               a.is_coherent, a.is_growing, a.status_message,
+               a.foundation_rate, a.aspirational_rate
         ORDER BY a.coherence_score DESC
         """
     )
@@ -325,19 +376,31 @@ def agents():
         return
 
     click.echo("Active Agents:")
-    click.echo("-" * 70)
+    click.echo("-" * 80)
     for row in result:
-        agent_id, agent_type, gen, score, coherent, growing, message = row
+        agent_id = row[0]
+        agent_type = row[1]
+        gen = row[2]
+        score = row[3]
+        coherent = row[4]
+        growing = row[5]
+        message = row[6]
+        foundation_rate = row[7] if len(row) > 7 else None
+        aspirational_rate = row[8] if len(row) > 8 else None
+
         score_str = f"{score:.4f}" if score else "untested"
 
         if coherent:
-            status = "+"
+            status_icon = "v"
         elif growing:
-            status = "^"
+            status_icon = "^"
         else:
-            status = "-"
+            status_icon = "x"
 
-        click.echo(f"{status} {agent_id}  type={agent_type}  gen={gen}  score={score_str}")
+        growing_str = " (growing)" if growing else ""
+        click.echo(f"{status_icon} {agent_id}  type={agent_type}  gen={gen}  score={score_str}{growing_str}")
+        if foundation_rate is not None:
+            click.echo(f"    foundation={foundation_rate:.2%}  aspirational={aspirational_rate:.2%}" if aspirational_rate else f"    foundation={foundation_rate:.2%}")
         if message:
             click.echo(f"    {message}")
 

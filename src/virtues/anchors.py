@@ -1,7 +1,7 @@
 """Virtue anchor definitions and initialization with tier support."""
 from ..graph.client import get_client
 from ..graph.queries import create_node, create_edge
-from .tiers import FOUNDATION, ASPIRATIONAL, is_foundation, get_tier_threshold
+from .tiers import FOUNDATION, ASPIRATIONAL, is_foundation, get_virtue_threshold
 
 VIRTUES = [
     {"id": "V01", "name": "Trustworthiness", "essence": "Reliability in being"},
@@ -54,11 +54,13 @@ def init_virtues(baseline_activation: float = 0.3):
     client = get_client()
 
     for virtue in VIRTUES:
+        v_id = virtue["id"]
         # Check if exists
-        if not client.node_exists(virtue["id"]):
-            v_id = virtue["id"]
-            tier = "foundation" if is_foundation(v_id) else "aspirational"
-            threshold = get_tier_threshold(tier)
+        if not client.node_exists(v_id):
+            # Determine tier
+            is_foundation_virtue = is_foundation(v_id)
+            tier = "foundation" if is_foundation_virtue else "aspirational"
+            threshold = get_virtue_threshold(v_id)
 
             create_node("VirtueAnchor", {
                 "id": v_id,

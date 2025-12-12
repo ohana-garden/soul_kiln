@@ -15,7 +15,7 @@ def init_schema():
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Trajectory) ON (n.id)")
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:DissolvedAgent) ON (n.id)")
 
-    # Knowledge pool indexes
+    # Knowledge pool and mercy system indexes
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Lesson) ON (n.id)")
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Pathway) ON (n.id)")
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Warning) ON (n.id)")

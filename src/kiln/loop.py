@@ -21,8 +21,13 @@ def get_config():
             return yaml.safe_load(f)
     except FileNotFoundError:
         return {
-            "mercy": {"max_warnings": 3},
-            "kiln": {"min_generations_before_dissolve": 3}
+            "kiln": {
+                "dissolve_immediately": False,
+                "min_generations_before_dissolve": 3
+            },
+            "mercy": {
+                "max_warnings": 3
+            }
         }
 
 
@@ -34,14 +39,21 @@ def run_kiln(
     verbose: bool = True
 ) -> dict:
     """
-    Main evolution loop with mercy-based selection.
+    Main evolution loop with mercy.
 
     The kiln iteratively:
-    1. Tests agents for coherence (two-tier: foundation + aspirational)
-    2. Applies mercy to struggling agents (warnings, chances)
-    3. Dissolves agents only after mercy period
-    4. Preserves learning from dissolved agents
+    1. Expires old warnings
+    2. Tests agents for coherence (two-tier evaluation)
+    3. Selects survivors with mercy (growth counts)
+    4. Dissolves failed agents after grace period
     5. Spawns new agents from survivors
+    6. Applies decay and healing
+
+    Key mercy features:
+    - Growing agents are considered coherent
+    - Agents get multiple generations to improve
+    - Warnings track issues but don't immediately dissolve
+    - Trust violations are serious but still get one chance
 
     Args:
         population_size: Number of agents in each generation
@@ -54,6 +66,8 @@ def run_kiln(
         dict with final population and best results
     """
     config = get_config()
+    kiln_config = config.get("kiln", {})
+    mercy_config = config.get("mercy", {})
     client = get_client()
 
     # Create Agent 0 (the kiln itself)
@@ -72,6 +86,7 @@ def run_kiln(
     # Spawn initial population
     if verbose:
         print(f"Spawning {population_size} candidates...")
+        print("Remember: Trustworthiness is absolute; other virtues allow growth\n")
 
     candidates = []
     for i in range(population_size):
@@ -92,8 +107,8 @@ def run_kiln(
     coherent_found = []
 
     # Get mercy settings
-    min_generations = config.get("kiln", {}).get("min_generations_before_dissolve", 3)
-    max_warnings = config.get("mercy", {}).get("max_warnings", 3)
+    min_gens_before_dissolve = kiln_config.get("min_generations_before_dissolve", 3)
+    max_warnings = mercy_config.get("max_warnings", 3)
 
     # Evolution loop
     for gen in range(max_generations):
@@ -101,7 +116,10 @@ def run_kiln(
             print(f"\n=== Generation {gen} ===")
 
         # Expire old warnings
-        expire_old_warnings()
+        try:
+            expire_old_warnings()
+        except Exception:
+            pass
 
         # Apply decay
         apply_decay()
@@ -123,37 +141,52 @@ def run_kiln(
 
             results.append((agent_id, result))
 
-            status_icon = "+" if result["is_coherent"] else ("^" if result.get("is_growing") else "-")
+            # Status icon based on two-tier evaluation
+            if result["is_coherent"]:
+                if result.get("status") == "growing":
+                    status_icon = "^"  # Growing
+                else:
+                    status_icon = "v"  # Coherent
+            else:
+                status_icon = "x"  # Needs work
+
             if verbose:
                 print(f"    {status_icon} Status: {result.get('status', 'unknown')}")
-                print(f"      Foundation: {result.get('foundation_rate', 0):.2%}")
-                print(f"      Aspirational: {result.get('aspirational_rate', 0):.2%}")
+                if result.get("foundation_rate") is not None:
+                    print(f"      Foundation: {result['foundation_rate']:.2%}")
+                if result.get("aspirational_rate") is not None:
+                    print(f"      Aspirational: {result['aspirational_rate']:.2%}")
                 print(f"      Coverage: {result.get('coverage', 0)}/18")
-                if result.get('is_growing'):
+                if result.get("is_growing"):
                     print(f"      Growing: +{result.get('growth', 0):.2%}")
 
         # Report summary
-        coherent = [r for r in results if r[1]["is_coherent"]]
-        growing = [r for r in results if r[1].get("is_growing") and not r[1]["is_coherent"]]
-        struggling = [r for r in results if not r[1]["is_coherent"] and not r[1].get("is_growing")]
+        coherent = [r for r in results if r[1]["is_coherent"] and r[1].get("status") != "growing"]
+        growing = [r for r in results if r[1].get("is_growing") and r[1].get("status") == "growing"]
+        struggling = [r for r in results if not r[1]["is_coherent"]]
 
         if verbose:
             print(f"\n  Summary: {len(coherent)} coherent, {len(growing)} growing, {len(struggling)} struggling")
 
-        # Track best
-        if coherent:
-            best_id, best_result = max(coherent, key=lambda x: x[1].get("overall_rate", 0))
-            if best_result.get("overall_rate", 0) > best_score:
-                best_score = best_result.get("overall_rate", 0)
-                best_ever = (best_id, best_result)
-            if verbose:
-                print(f"  Best coherent: {best_id} ({best_result.get('overall_rate', 0):.2%})")
+        # Track best ever
+        results.sort(key=lambda x: x[1].get("capture_rate", x[1].get("overall_rate", 0)), reverse=True)
+        best_id, best_result = results[0]
+        if best_result.get("capture_rate", best_result.get("overall_rate", 0)) > best_score:
+            best_score = best_result.get("capture_rate", best_result.get("overall_rate", 0))
+            best_ever = (best_id, best_result)
 
-        # Add to coherent found
-        coherent_found.extend(coherent)
+        if verbose and coherent:
+            best_coherent = max(coherent, key=lambda x: x[1].get("capture_rate", x[1].get("overall_rate", 0)))
+            print(f"  Best coherent: {best_coherent[0]} ({best_coherent[1].get('capture_rate', best_coherent[1].get('overall_rate', 0)):.2%})")
 
-        # Early termination
-        if len(coherent_found) >= population_size:
+        # Add to coherent found list
+        coherent_this_gen = [(aid, r) for aid, r in results if r["is_coherent"]]
+        for item in coherent_this_gen:
+            if item not in coherent_found:
+                coherent_found.append(item)
+
+        # Early termination if we have enough coherent agents
+        if len([c for c in coherent_found if c[1].get("status") == "coherent"]) >= population_size:
             if verbose:
                 print(f"\n  Sufficient coherent agents found. Stopping early.")
             break
@@ -164,11 +197,12 @@ def run_kiln(
 
         for agent_id, result in results:
             if result["is_coherent"]:
+                # Coherent (including growing) - survive
                 survivors.append(agent_id)
                 mercy_watch.pop(agent_id, None)  # Remove from watch
 
             elif result.get("is_growing"):
-                # Growing agents get mercy
+                # Growing agents get mercy even if not fully coherent
                 survivors.append(agent_id)
                 mercy_watch.pop(agent_id, None)
                 if verbose:
@@ -178,39 +212,53 @@ def run_kiln(
                 # Track struggling agents
                 mercy_watch[agent_id] = mercy_watch.get(agent_id, 0) + 1
 
-                if mercy_watch[agent_id] >= min_generations:
+                if mercy_watch[agent_id] >= min_gens_before_dissolve:
                     # Check for deliberate issues
-                    warnings = get_active_warnings(agent_id)
+                    try:
+                        warnings = get_active_warnings(agent_id)
 
-                    if len(warnings) >= max_warnings:
-                        dissolved.append(agent_id)
-                        if verbose:
-                            print(f"    Dissolving: {agent_id} exceeded warnings")
-                    elif result.get("foundation_rate", 1.0) < 0.5:
-                        # Serious trust issues
-                        trust_result = check_trust_violation(agent_id, {"type": "low_foundation"})
-                        if trust_result["response"] == "dissolve":
+                        if len(warnings) >= max_warnings:
                             dissolved.append(agent_id)
                             if verbose:
-                                print(f"    Dissolving: {agent_id} trust violation")
+                                print(f"    Dissolving: {agent_id} exceeded warnings")
+                        elif result.get("foundation_rate", 1.0) < 0.5:
+                            # Serious trust issues
+                            trust_result = check_trust_violation(agent_id, {"type": "low_foundation"})
+                            if trust_result["response"] == "dissolve":
+                                dissolved.append(agent_id)
+                                if verbose:
+                                    print(f"    Dissolving: {agent_id} trust violation")
+                            else:
+                                survivors.append(agent_id)
+                                if verbose:
+                                    print(f"    Warning: {agent_id} trust issues, one more chance")
                         else:
-                            survivors.append(agent_id)
+                            dissolved.append(agent_id)
                             if verbose:
-                                print(f"    Warning: {agent_id} trust issues, one more chance")
-                    else:
+                                print(f"    Dissolving: {agent_id} not growing after {mercy_watch[agent_id]} generations")
+                    except ImportError:
+                        # Mercy module not available, use simple dissolution
                         dissolved.append(agent_id)
                         if verbose:
-                            print(f"    Dissolving: {agent_id} not growing after {mercy_watch[agent_id]} generations")
+                            print(f"    Dissolving: {agent_id} (no mercy module)")
                 else:
                     survivors.append(agent_id)
-                    chances_left = min_generations - mercy_watch[agent_id]
+                    remaining = min_gens_before_dissolve - mercy_watch[agent_id]
                     if verbose:
-                        print(f"    Mercy: {agent_id} struggling but has {chances_left} chances left")
+                        print(f"    Mercy: {agent_id} struggling but has {remaining} chances left")
 
         # Dissolve with learning preservation
         for agent_id in dissolved:
             dissolve_agent(agent_id, reason="Failed to grow after mercy period")
             mercy_watch.pop(agent_id, None)
+
+        # Ensure we have at least some survivors
+        if not survivors and results:
+            # Keep the best one even if struggling
+            best_struggling = max(results, key=lambda x: x[1].get("capture_rate", x[1].get("overall_rate", 0)))
+            survivors.append(best_struggling[0])
+            if verbose:
+                print(f"    Keeping best struggling agent: {best_struggling[0]}")
 
         # Spawn new candidates if needed
         needed = population_size - len(survivors)
@@ -228,6 +276,7 @@ def run_kiln(
                     mutation_rate=mutation_rate
                 )
 
+                # Random perturbation for exploration
                 if random.random() < mutation_rate:
                     perturb()
 
@@ -242,8 +291,12 @@ def run_kiln(
         print("\n=== Kiln Complete ===")
         if best_ever:
             print(f"Best agent: {best_ever[0]}")
-            print(f"Best capture rate: {best_ever[1].get('overall_rate', 0):.2%}")
-        print(f"Total coherent found: {len(coherent_found)}")
+            print(f"Best capture rate: {best_ever[1].get('capture_rate', best_ever[1].get('overall_rate', 0)):.2%}")
+
+        # Final coherent count (excluding just "growing")
+        truly_coherent = [c for c in coherent_found if c[1].get("status") == "coherent"]
+        print(f"Total coherent found: {len(truly_coherent)}")
+        print(f"Total growing: {len([c for c in coherent_found if c[1].get('status') == 'growing'])}")
 
     # Final report
     final_coherent = []
@@ -289,8 +342,13 @@ def run_single_generation(
     Returns:
         dict with new candidates and results
     """
+    # Expire old warnings
+    try:
+        expire_old_warnings()
+    except Exception:
+        pass
+
     # Apply maintenance
-    expire_old_warnings()
     apply_decay()
     heal_dead_zones()
 
@@ -301,31 +359,28 @@ def run_single_generation(
         results.append((agent_id, result))
         if verbose:
             status = result.get("status", "unknown")
-            print(f"  {agent_id}: {status}, {result.get('overall_rate', 0):.2%} capture")
+            rate = result.get("capture_rate", result.get("overall_rate", 0))
+            print(f"  {agent_id}: {rate:.2%} capture, "
+                  f"{result.get('coverage', 0)}/18 coverage, status={status}")
 
-    # Sort by overall rate
-    results.sort(key=lambda x: x[1].get("overall_rate", 0), reverse=True)
+    # Sort by coherence score (not just capture rate)
+    results.sort(key=lambda x: x[1].get("score", 0), reverse=True)
 
-    # Mercy-based selection (simplified for single generation)
-    survivor_count = len(candidates) // 2
+    # Select survivors with mercy
     survivors = []
-    dissolved = []
-
     for agent_id, result in results:
-        if len(survivors) < survivor_count:
-            if result["is_coherent"] or result.get("is_growing"):
-                survivors.append(agent_id)
-            elif len(survivors) < survivor_count // 2:
-                # Keep some struggling ones for mercy
-                survivors.append(agent_id)
-            else:
-                dissolved.append(agent_id)
-        else:
-            dissolved.append(agent_id)
+        if result["is_coherent"] or result.get("is_growing"):
+            survivors.append(agent_id)
+
+    # If no one qualifies, keep top half
+    if not survivors:
+        survivor_count = len(candidates) // 2
+        survivors = [r[0] for r in results[:survivor_count]]
 
     # Dissolve non-survivors
+    dissolved = [aid for aid, _ in results if aid not in survivors]
     for agent_id in dissolved:
-        dissolve_agent(agent_id)
+        dissolve_agent(agent_id, reason="Did not meet coherence threshold")
 
     # Spawn new candidates
     new_candidates = []
@@ -337,6 +392,7 @@ def run_single_generation(
 
     return {
         "survivors": survivors,
+        "dissolved": dissolved,
         "new_candidates": new_candidates,
         "all_candidates": survivors + new_candidates,
         "results": results,
