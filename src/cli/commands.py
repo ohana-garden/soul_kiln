@@ -127,7 +127,7 @@ def test(agent_id, stimuli):
     click.echo(f"  Captures: {result.get('foundation_captures', {})}")
 
     click.echo(f"\nAspirational (18 virtues):")
-    click.echo(f"  Rate: {result.get('aspirational_rate', 0):.2%} (need >=60%)")
+    click.echo(f"  Rate: {result.get('aspirational_rate', 0):.2%} (need >=80%)")
     click.echo(f"  Coverage: {result.get('coverage', 0)}/18 (need >=10)")
     click.echo(f"  Captures: {result.get('aspirational_captures', {})}")
 
@@ -345,7 +345,7 @@ def virtues():
         v_id, name, essence, activation, tier, threshold, degree = row
         tier = tier or ("foundation" if v_id == "V01" else "aspirational")
         activation = activation if activation is not None else 0.0
-        threshold = threshold if threshold is not None else (0.99 if tier == "foundation" else 0.60)
+        threshold = threshold if threshold is not None else (0.99 if tier == "foundation" else 0.80)
 
         if tier != current_tier:
             current_tier = tier
@@ -418,7 +418,7 @@ def tiers():
         click.echo(f"       Threshold: {info['threshold']:.0%}")
         click.echo(f"       {info['reason']}\n")
 
-    click.echo("\nASPIRATIONAL (Growth-oriented, 60% threshold):")
+    click.echo("\nASPIRATIONAL (Growth-oriented, 80% threshold):")
     click.echo("-" * 40)
     for v_id, info in ASPIRATIONAL.items():
         click.echo(f"  {v_id}: {info['name']}")

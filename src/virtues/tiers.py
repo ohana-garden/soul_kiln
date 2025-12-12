@@ -69,14 +69,14 @@ def get_tier_threshold(tier: str) -> float:
     """Get the capture threshold for a tier."""
     if tier == "foundation":
         return 0.99
-    return 0.60
+    return 0.80
 
 
 def get_virtue_threshold(virtue_id: str) -> float:
     """Get the coherence threshold for a virtue based on its tier."""
     if virtue_id in FOUNDATION:
         return FOUNDATION[virtue_id].get("threshold", 0.99)
-    return 0.60
+    return 0.80
 
 
 def get_foundation_ids() -> list:

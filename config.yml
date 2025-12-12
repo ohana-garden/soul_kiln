@@ -12,7 +12,7 @@ virtues:
   foundation:
     - V01  # Trustworthiness
   foundation_threshold: 0.99  # Must almost always hold
-  aspirational_threshold: 0.60  # Much more lenient
+  aspirational_threshold: 0.80  # Growth-oriented threshold
   growth_bonus: 0.10  # Reward for improvement
 
 dynamics:
@@ -39,7 +39,7 @@ coherence:
   foundation_capture_rate: 0.99
 
   # Aspirational (other 18)
-  aspirational_capture_rate: 0.60
+  aspirational_capture_rate: 0.80
   min_coverage: 10             # At least 10 virtues, not all 19
   max_dominance: 0.40
 
