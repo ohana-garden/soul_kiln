@@ -93,8 +93,9 @@ class VirtueSimulator:
                     
                     try:
                         topology.add_relationship(from_v, to_v, weight, constraint_type)
-                    except:
-                        pass  # Skip if relationship already exists
+                    except (ValueError, KeyError) as e:
+                        # Skip if relationship already exists or other error
+                        pass
             
             template = SoulTemplate(topology)
             self.population.append(template)

@@ -123,8 +123,9 @@ class VirtueTopology:
                         return False  # Circular requirements are invalid
             
             return True
-        except:
-            return True
+        except (nx.NetworkXError, KeyError) as e:
+            # If there's an error analyzing the graph, consider it invalid
+            return False
     
     def get_virtue_strengths(self) -> Dict[str, float]:
         """Get the strength of each virtue basin."""

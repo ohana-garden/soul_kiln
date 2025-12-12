@@ -6,10 +6,10 @@ This script creates visual representations of the moral topology.
 Note: Requires matplotlib for plotting.
 """
 
-import numpy as np
 import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
+matplotlib.use('Agg')  # Use non-interactive backend (must be before pyplot import)
 import matplotlib.pyplot as plt
+import numpy as np
 
 from virtue_basin import VirtueTopology, VirtueSimulator, BasinAttractor
 from virtue_basin.visualization import (
