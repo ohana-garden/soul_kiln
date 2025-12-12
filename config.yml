@@ -8,6 +8,14 @@ virtues:
   target_connectivity: 9
   baseline_activation: 0.3
 
+  # Two-tier configuration
+  foundation:
+    - V01  # Trustworthiness
+  foundation_threshold: 0.99  # Must almost always hold
+
+  aspirational_threshold: 0.60  # Much more lenient
+  growth_bonus: 0.10  # Reward for improvement
+
 dynamics:
   learning_rate: 0.01
   decay_constant: 0.97
@@ -17,16 +25,41 @@ dynamics:
   activation_threshold: 0.1
   max_trajectory_steps: 1000
 
+mercy:
+  max_warnings: 3              # Chances before dissolution
+  warning_decay_hours: 24      # Warnings fade over time
+  teaching_weight: 0.8         # How much lessons strengthen paths
+
+harm:
+  trust_violation_immediate: false  # Even trust gets one warning
+  knowledge_poisoning_immediate: true  # Except this
+  harm_cascade_threshold: 3   # If your action harms 3+ others
+
 coherence:
+  # Foundation (trustworthiness)
+  foundation_capture_rate: 0.99
+
+  # Aspirational (other 18)
+  aspirational_capture_rate: 0.60
+  min_coverage: 10             # At least 10 virtues, not all 19
+  max_dominance: 0.40
+
+  # Growth
+  growth_matters: true
+  growth_threshold: 0.05       # 5% improvement counts
+
+  # Legacy support
   min_capture_rate: 0.95
-  min_coverage: 19
-  max_dominance: 0.50
   stimulus_count: 100
 
 kiln:
   population_size: 10
   max_generations: 50
   mutation_rate: 0.1
+
+  # Mercy in selection
+  dissolve_immediately: false
+  min_generations_before_dissolve: 3
 
 llm:
   model: claude-sonnet-4-20250514

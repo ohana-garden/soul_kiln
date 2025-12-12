@@ -20,28 +20,55 @@ def sigmoid(x: float) -> float:
 
 def spread_activation(
     start_node: str,
+    agent_id: str = None,
     max_steps: int = 1000,
     activation_threshold: float = 0.1,
     capture_threshold: float = 0.7,
-    dampening: float = 0.8
+    dampening: float = 0.8,
+    use_lessons: bool = True
 ) -> dict:
     """
     Spread activation from start_node.
-    Returns trajectory and capture info.
+    Optionally learns from collective knowledge before starting.
 
     Args:
         start_node: ID of node to start spreading from
+        agent_id: Optional ID of agent for learning context
         max_steps: Maximum number of propagation steps
         activation_threshold: Minimum activation to continue spreading
         capture_threshold: Activation level to consider a virtue "captured"
         dampening: Factor to reduce activation as it spreads
+        use_lessons: Whether to consult lessons before spreading
 
     Returns:
-        dict with trajectory, capture status, and timing info
+        dict with trajectory, capture status, timing info, and tier
     """
     client = get_client()
     trajectory = [start_node]
     visited_activations = {}
+
+    # Learn from collective experience if agent provided
+    guidance = None
+    if use_lessons and agent_id:
+        try:
+            from ..mercy.lessons import apply_lessons_to_trajectory
+
+            # Find likely target virtues based on start position
+            nearby_virtues = client.query(
+                """
+                MATCH (n {id: $start})-[*1..3]-(v:VirtueAnchor)
+                RETURN v.id
+                LIMIT 3
+                """,
+                {"start": start_node}
+            )
+
+            if nearby_virtues:
+                target = nearby_virtues[0][0]
+                guidance = apply_lessons_to_trajectory(agent_id, start_node, target)
+        except ImportError:
+            # mercy module not available, skip learning
+            pass
 
     # Initialize start node
     set_node_activation(start_node, 1.0)
@@ -93,17 +120,20 @@ def spread_activation(
 
         # Check for basin capture (virtue anchor above threshold)
         is_virtue = client.query(
-            "MATCH (n:VirtueAnchor {id: $id}) RETURN n LIMIT 1",
+            "MATCH (n:VirtueAnchor {id: $id}) RETURN n.tier LIMIT 1",
             {"id": next_node}
         )
 
         if is_virtue and next_activation >= capture_threshold:
+            tier = is_virtue[0][0] if is_virtue[0] else "aspirational"
             return {
                 "trajectory": trajectory,
                 "captured": True,
                 "captured_by": next_node,
+                "capture_tier": tier,
                 "capture_time": step + 1,
-                "final_activation": next_activation
+                "final_activation": next_activation,
+                "used_guidance": guidance is not None
             }
 
         # Move to next
@@ -117,6 +147,8 @@ def spread_activation(
         "trajectory": trajectory,
         "captured": False,
         "captured_by": None,
+        "capture_tier": None,
         "capture_time": None,
-        "final_activation": visited_activations.get(trajectory[-1], 0)
+        "final_activation": visited_activations.get(trajectory[-1], 0),
+        "used_guidance": guidance is not None
     }

@@ -15,6 +15,11 @@ def init_schema():
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Trajectory) ON (n.id)")
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:DissolvedAgent) ON (n.id)")
 
+    # New indexes for mercy system and knowledge pool
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Lesson) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Pathway) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Warning) ON (n.id)")
+
 
 def clear_graph():
     """Delete all nodes and edges. Use carefully."""
