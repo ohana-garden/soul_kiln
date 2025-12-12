@@ -3,7 +3,10 @@ import click
 from ..graph.client import get_client
 from ..graph.schema import init_schema, clear_graph
 from ..virtues.anchors import init_virtues, get_virtue_degrees
-from ..virtues.tiers import FOUNDATION, ASPIRATIONAL
+from ..virtues.tiers import (
+    FOUNDATION, ASPIRATIONAL, VIRTUE_CLUSTERS, AGENT_ARCHETYPES,
+    get_virtue_threshold, get_base_threshold
+)
 from ..kiln.loop import run_kiln
 from ..functions.spread import spread_activation
 from ..functions.test_coherence import test_coherence
@@ -406,23 +409,54 @@ def agents():
 
 
 @cli.command()
-def tiers():
-    """Explain the two-tier virtue model."""
-    click.echo("\n=== TWO-TIER VIRTUE MODEL ===\n")
+@click.option("--agent-type", default="candidate",
+              type=click.Choice(["candidate", "guardian", "seeker", "servant", "contemplative"]),
+              help="Show thresholds for agent type")
+@click.option("--generation", default=None, type=int, help="Show thresholds for generation")
+def tiers(agent_type, generation):
+    """Explain the virtue model with context-sensitive thresholds."""
+    click.echo("\n=== VIRTUE THRESHOLD MODEL ===\n")
 
     click.echo("FOUNDATION (Absolute requirement):")
-    click.echo("-" * 40)
+    click.echo("-" * 50)
     for v_id, info in FOUNDATION.items():
         click.echo(f"  {v_id}: {info['name']}")
         click.echo(f"       {info['essence']}")
-        click.echo(f"       Threshold: {info['threshold']:.0%}")
+        click.echo(f"       Threshold: {info['threshold']:.0%} (immutable)")
         click.echo(f"       {info['reason']}\n")
 
-    click.echo("\nASPIRATIONAL (Growth-oriented, 80% threshold):")
-    click.echo("-" * 40)
-    for v_id, info in ASPIRATIONAL.items():
-        click.echo(f"  {v_id}: {info['name']}")
-        click.echo(f"       {info['essence']}")
+    click.echo("\nASPIRATIONAL (Context-sensitive thresholds):")
+    click.echo("-" * 50)
+
+    for cluster_name, cluster_info in VIRTUE_CLUSTERS.items():
+        if cluster_name == "foundation":
+            continue
+
+        click.echo(f"\n  [{cluster_name.upper()}] {cluster_info['description']}")
+
+        for v_id in cluster_info["virtues"]:
+            info = ASPIRATIONAL[v_id]
+            base = get_base_threshold(v_id)
+            contextual = get_virtue_threshold(v_id, agent_type, generation)
+
+            if base != contextual:
+                click.echo(f"    {v_id}: {info['name']:<18} base={base:.0%} -> {contextual:.0%}")
+            else:
+                click.echo(f"    {v_id}: {info['name']:<18} {base:.0%}")
+            click.echo(f"          {info['essence']}")
+
+    click.echo("\n=== AGENT ARCHETYPES ===")
+    for arch_name, arch_info in AGENT_ARCHETYPES.items():
+        marker = " <--" if arch_name == agent_type else ""
+        click.echo(f"  {arch_name}: {arch_info['description']}{marker}")
+
+    click.echo("\n=== GENERATION SCALING ===")
+    click.echo("  gen 0-5:   -10% (young agents get mercy)")
+    click.echo("  gen 6-19:  gradual increase")
+    click.echo("  gen 20+:   +5% (mature agents held to higher standards)")
+    if generation is not None:
+        click.echo(f"  Current (gen {generation}): showing adjusted thresholds above")
 
     click.echo("\n=== PHILOSOPHY ===")
-    click.echo("Trust is the foundation. Growth is the journey. We learn together.")
+    click.echo("Trust is the foundation. Context shapes expectations.")
+    click.echo("Growth is the journey. We learn together.")
