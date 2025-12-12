@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordb_data:/data
+    command: >
+      --loadmodule /usr/lib/redis/modules/falkordb.so
+
+volumes:
+  falkordb_data:

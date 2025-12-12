@@ -1,0 +1,22 @@
+"""Graph schema initialization."""
+from .client import get_client
+
+
+def init_schema():
+    """Create indexes and constraints."""
+    client = get_client()
+
+    # Node indexes
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:VirtueAnchor) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Concept) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Agent) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:SSF) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:File) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Trajectory) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:DissolvedAgent) ON (n.id)")
+
+
+def clear_graph():
+    """Delete all nodes and edges. Use carefully."""
+    client = get_client()
+    client.execute("MATCH (n) DETACH DELETE n")
