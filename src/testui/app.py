@@ -1,35 +1,22 @@
 """
-Test UI for Proxy Agent Subsystems.
+Test UI for Graph-Based Proxy Agent Architecture.
 
-A temporary web interface for exploring and testing the Ambassador
-agent architecture without requiring a database connection.
+A web interface for exploring and testing the Ambassador agent
+with all definitions loaded from the FalkorDB graph.
 """
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import Any
-import json
+from typing import Any, Optional
 
-# Import definitions (these don't require database)
-from src.kuleana.definitions import AMBASSADOR_KULEANAS, get_kuleanas_by_domain, get_kuleanas_by_virtue
-from src.skills.definitions import AMBASSADOR_SKILLS, get_skills_by_type, get_skills_by_domain
-from src.beliefs.definitions import AMBASSADOR_BELIEFS, get_beliefs_by_type, get_core_beliefs
-from src.lore.definitions import AMBASSADOR_LORE, get_lore_by_type, get_immutable_lore
-from src.voice.definitions import AMBASSADOR_VOICE, get_patterns_by_type, get_emotion_patterns
-from src.virtues.anchors import VIRTUES, AFFINITIES
-from src.virtues.tiers import FOUNDATION, ASPIRATIONAL, JUDGMENT_LENS
-from src.models import (
-    Kuleana, Skill, Belief, LoreFragment, VoicePattern,
-    EpisodicMemory, IdentityCore, SkillType, BeliefType,
-    MemoryType, MemoryDecayClass
-)
+from src.graph import get_client
+from src.runtime import GraphAgentFactory, get_bridge
 
 app = FastAPI(
     title="Soul Kiln Test UI",
-    description="Test interface for the Proxy Agent Architecture",
-    version="0.1.0"
+    description="Test interface for the Graph-Based Proxy Agent Architecture",
+    version="2.0.0"
 )
 
 
@@ -39,460 +26,258 @@ app = FastAPI(
 
 @app.get("/api/overview")
 def get_overview():
-    """Get overview of all subsystems."""
+    """Get overview of all data in the graph."""
+    client = get_client()
+
+    def count_nodes(label: str) -> int:
+        try:
+            result = client.query(f"MATCH (n:{label}) RETURN count(n) as c")
+            return result[0][0] if result else 0
+        except Exception:
+            return 0
+
     return {
         "subsystems": {
-            "virtues": {
-                "count": len(VIRTUES),
-                "foundation": len(FOUNDATION),
-                "aspirational": len(ASPIRATIONAL),
-            },
-            "kuleanas": {
-                "count": len(AMBASSADOR_KULEANAS),
-                "domains": list(set(k.domain for k in AMBASSADOR_KULEANAS.values())),
-            },
-            "skills": {
-                "count": len(AMBASSADOR_SKILLS),
-                "types": [t.value for t in SkillType],
-            },
-            "beliefs": {
-                "count": len(AMBASSADOR_BELIEFS),
-                "types": [t.value for t in BeliefType],
-            },
-            "lore": {
-                "count": len(AMBASSADOR_LORE),
-                "types": ["origin", "lineage", "theme", "commitment", "taboo", "prophecy"],
-            },
-            "voice": {
-                "count": len(AMBASSADOR_VOICE),
-                "types": ["tone", "lexicon", "metaphor", "emotion_response", "boundary"],
-            },
+            "agent_types": count_nodes("AgentType"),
+            "agent_instances": count_nodes("AgentInstance"),
+            "virtues": count_nodes("Virtue"),
+            "kuleanas": count_nodes("Kuleana"),
+            "beliefs": count_nodes("Belief"),
+            "taboos": count_nodes("Taboo"),
+            "lore": count_nodes("Lore"),
+            "voice_patterns": count_nodes("VoicePattern"),
+            "prompts": count_nodes("Prompt"),
+            "tools": count_nodes("Tool"),
         },
-        "identity": {
-            "archetype": "Ambassador",
-            "sacred_commitments": 3,
-            "taboos": 4,
-        }
+        "graph_status": "connected",
     }
 
 
-# --- Virtues ---
+@app.get("/api/agent-types")
+def get_agent_types():
+    """Get all agent types."""
+    client = get_client()
+    query = """
+    MATCH (t:AgentType)
+    RETURN t
+    ORDER BY t.name
+    """
+    result = client.query(query)
+    return {
+        "agent_types": [dict(row[0].properties) for row in result if row[0]]
+    }
+
+
+@app.get("/api/agent-types/{type_id}")
+def get_agent_type(type_id: str):
+    """Get detailed info about an agent type."""
+    client = get_client()
+
+    # Get type info
+    query = "MATCH (t:AgentType {id: $id}) RETURN t"
+    result = client.query(query, {"id": type_id})
+    if not result:
+        return {"error": "Agent type not found"}
+
+    agent_type = dict(result[0][0].properties)
+
+    # Get related data
+    virtues_q = """
+    MATCH (t:AgentType {id: $id})-[r:HAS_VIRTUE]->(v:Virtue)
+    RETURN v, r.priority as priority
+    ORDER BY r.priority DESC
+    """
+    virtues = client.query(virtues_q, {"id": type_id})
+
+    kuleanas_q = """
+    MATCH (t:AgentType {id: $id})-[r:HAS_KULEANA]->(k:Kuleana)
+    RETURN k, r.priority as priority
+    ORDER BY r.priority DESC
+    """
+    kuleanas = client.query(kuleanas_q, {"id": type_id})
+
+    beliefs_q = """
+    MATCH (t:AgentType {id: $id})-[r:HOLDS_BELIEF]->(b:Belief)
+    RETURN b, r.strength as strength
+    ORDER BY r.strength DESC
+    """
+    beliefs = client.query(beliefs_q, {"id": type_id})
+
+    taboos_q = """
+    MATCH (t:AgentType {id: $id})-[r:OBSERVES_TABOO]->(tb:Taboo)
+    RETURN tb, r.severity as severity
+    """
+    taboos = client.query(taboos_q, {"id": type_id})
+
+    prompts_q = """
+    MATCH (t:AgentType {id: $id})-[:HAS_PROMPT]->(p:Prompt)
+    RETURN p
+    """
+    prompts = client.query(prompts_q, {"id": type_id})
+
+    tools_q = """
+    MATCH (t:AgentType {id: $id})-[:HAS_TOOL]->(tool:Tool)
+    RETURN tool
+    """
+    tools = client.query(tools_q, {"id": type_id})
+
+    return {
+        **agent_type,
+        "virtues": [
+            {**dict(row[0].properties), "priority": row[1]}
+            for row in virtues if row[0]
+        ],
+        "kuleanas": [
+            {**dict(row[0].properties), "priority": row[1]}
+            for row in kuleanas if row[0]
+        ],
+        "beliefs": [
+            {**dict(row[0].properties), "strength": row[1]}
+            for row in beliefs if row[0]
+        ],
+        "taboos": [
+            {**dict(row[0].properties), "severity": row[1]}
+            for row in taboos if row[0]
+        ],
+        "prompts": [dict(row[0].properties) for row in prompts if row[0]],
+        "tools": [dict(row[0].properties) for row in tools if row[0]],
+    }
+
 
 @app.get("/api/virtues")
 def get_virtues():
     """Get all virtues."""
+    client = get_client()
+    query = "MATCH (v:Virtue) RETURN v ORDER BY v.name"
+    result = client.query(query)
     return {
-        "virtues": VIRTUES,
-        "foundation": FOUNDATION,
-        "aspirational": ASPIRATIONAL,
-        "affinities": AFFINITIES,
-        "judgment_lens": JUDGMENT_LENS,
+        "virtues": [dict(row[0].properties) for row in result if row[0]]
     }
 
-
-@app.get("/api/virtues/{virtue_id}")
-def get_virtue(virtue_id: str):
-    """Get a specific virtue."""
-    for v in VIRTUES:
-        if v["id"] == virtue_id:
-            tier = "foundation" if virtue_id in FOUNDATION else "aspirational"
-            return {
-                **v,
-                "tier": tier,
-                "affinities": AFFINITIES.get(virtue_id, []),
-                "required_by_kuleanas": [k.id for k in get_kuleanas_by_virtue(virtue_id)],
-            }
-    return {"error": "Virtue not found"}
-
-
-# --- Kuleanas ---
 
 @app.get("/api/kuleanas")
 def get_kuleanas():
     """Get all kuleanas."""
+    client = get_client()
+    query = "MATCH (k:Kuleana) RETURN k ORDER BY k.name"
+    result = client.query(query)
     return {
-        "kuleanas": {
-            k_id: {
-                "id": k.id,
-                "name": k.name,
-                "description": k.description,
-                "domain": k.domain,
-                "priority": k.priority,
-                "serves": k.serves,
-                "required_virtues": k.required_virtues,
-                "required_skills": k.required_skills,
-            }
-            for k_id, k in AMBASSADOR_KULEANAS.items()
-        }
+        "kuleanas": [dict(row[0].properties) for row in result if row[0]]
     }
 
-
-@app.get("/api/kuleanas/{kuleana_id}")
-def get_kuleana(kuleana_id: str):
-    """Get a specific kuleana."""
-    if kuleana_id in AMBASSADOR_KULEANAS:
-        k = AMBASSADOR_KULEANAS[kuleana_id]
-        return {
-            "id": k.id,
-            "name": k.name,
-            "description": k.description,
-            "domain": k.domain,
-            "authority_level": k.authority_level,
-            "priority": k.priority,
-            "serves": k.serves,
-            "accountable_to": k.accountable_to,
-            "required_virtues": k.required_virtues,
-            "required_skills": k.required_skills,
-            "trigger_conditions": k.trigger_conditions,
-            "completion_criteria": k.completion_criteria,
-            "can_delegate": k.can_delegate,
-        }
-    return {"error": "Kuleana not found"}
-
-
-# --- Skills ---
-
-@app.get("/api/skills")
-def get_skills():
-    """Get all skills."""
-    return {
-        "skills": {
-            s_id: {
-                "id": s.id,
-                "name": s.name,
-                "description": s.description,
-                "skill_type": s.skill_type.value,
-                "domain": s.domain,
-                "mastery_floor": s.mastery_floor,
-                "tool_id": s.tool_id,
-            }
-            for s_id, s in AMBASSADOR_SKILLS.items()
-        }
-    }
-
-
-@app.get("/api/skills/by-type/{skill_type}")
-def get_skills_by_type_endpoint(skill_type: str):
-    """Get skills by type."""
-    try:
-        st = SkillType(skill_type)
-        skills = get_skills_by_type(st)
-        return {
-            "type": skill_type,
-            "skills": [
-                {"id": s.id, "name": s.name, "description": s.description}
-                for s in skills
-            ]
-        }
-    except ValueError:
-        return {"error": f"Invalid skill type: {skill_type}"}
-
-
-@app.get("/api/skills/{skill_id}")
-def get_skill(skill_id: str):
-    """Get a specific skill."""
-    if skill_id in AMBASSADOR_SKILLS:
-        s = AMBASSADOR_SKILLS[skill_id]
-        return {
-            "id": s.id,
-            "name": s.name,
-            "description": s.description,
-            "skill_type": s.skill_type.value,
-            "domain": s.domain,
-            "mastery_floor": s.mastery_floor,
-            "decay_rate": s.decay_rate,
-            "prerequisite_skills": s.prerequisite_skills,
-            "prerequisite_knowledge": s.prerequisite_knowledge,
-            "required_virtues": s.required_virtues,
-            "tool_id": s.tool_id,
-            "activation_cost": s.activation_cost,
-            "cooldown_steps": s.cooldown_steps,
-        }
-    return {"error": "Skill not found"}
-
-
-# --- Beliefs ---
 
 @app.get("/api/beliefs")
 def get_beliefs():
     """Get all beliefs."""
+    client = get_client()
+    query = "MATCH (b:Belief) RETURN b"
+    result = client.query(query)
     return {
-        "beliefs": {
-            b_id: {
-                "id": b.id,
-                "content": b.content,
-                "belief_type": b.belief_type.value,
-                "conviction": b.conviction,
-                "entrenchment": b.entrenchment,
-            }
-            for b_id, b in AMBASSADOR_BELIEFS.items()
-        }
+        "beliefs": [dict(row[0].properties) for row in result if row[0]]
     }
 
 
-@app.get("/api/beliefs/by-type/{belief_type}")
-def get_beliefs_by_type_endpoint(belief_type: str):
-    """Get beliefs by type."""
-    try:
-        bt = BeliefType(belief_type)
-        beliefs = get_beliefs_by_type(bt)
-        return {
-            "type": belief_type,
-            "beliefs": [
-                {"id": b.id, "content": b.content, "conviction": b.conviction}
-                for b in beliefs
-            ]
-        }
-    except ValueError:
-        return {"error": f"Invalid belief type: {belief_type}"}
-
-
-@app.get("/api/beliefs/core")
-def get_core_beliefs_endpoint():
-    """Get core beliefs (high conviction and entrenchment)."""
-    beliefs = get_core_beliefs()
+@app.get("/api/taboos")
+def get_taboos():
+    """Get all taboos."""
+    client = get_client()
+    query = "MATCH (t:Taboo) RETURN t"
+    result = client.query(query)
     return {
-        "core_beliefs": [
-            {"id": b.id, "content": b.content, "conviction": b.conviction}
-            for b in beliefs
-        ]
+        "taboos": [dict(row[0].properties) for row in result if row[0]]
     }
 
-
-@app.get("/api/beliefs/{belief_id}")
-def get_belief(belief_id: str):
-    """Get a specific belief."""
-    if belief_id in AMBASSADOR_BELIEFS:
-        b = AMBASSADOR_BELIEFS[belief_id]
-        return {
-            "id": b.id,
-            "content": b.content,
-            "belief_type": b.belief_type.value,
-            "conviction": b.conviction,
-            "entrenchment": b.entrenchment,
-            "grounded_in": b.grounded_in,
-            "supports": b.supports,
-            "conflicts_with": b.conflicts_with,
-            "revision_threshold": b.revision_threshold,
-        }
-    return {"error": "Belief not found"}
-
-
-# --- Lore ---
 
 @app.get("/api/lore")
 def get_lore():
-    """Get all lore fragments."""
+    """Get all lore."""
+    client = get_client()
+    query = "MATCH (l:Lore) RETURN l ORDER BY l.importance DESC"
+    result = client.query(query)
     return {
-        "lore": {
-            l_id: {
-                "id": l.id,
-                "content": l.content[:100] + "..." if len(l.content) > 100 else l.content,
-                "fragment_type": l.fragment_type,
-                "salience": l.salience,
-                "immutable": l.immutable,
-            }
-            for l_id, l in AMBASSADOR_LORE.items()
-        }
+        "lore": [dict(row[0].properties) for row in result if row[0]]
     }
 
-
-@app.get("/api/lore/by-type/{lore_type}")
-def get_lore_by_type_endpoint(lore_type: str):
-    """Get lore by type."""
-    lore = get_lore_by_type(lore_type)
-    return {
-        "type": lore_type,
-        "lore": [
-            {"id": l.id, "content": l.content, "immutable": l.immutable}
-            for l in lore
-        ]
-    }
-
-
-@app.get("/api/lore/immutable")
-def get_immutable_lore_endpoint():
-    """Get immutable lore fragments."""
-    lore = get_immutable_lore()
-    return {
-        "immutable_lore": [
-            {"id": l.id, "content": l.content, "type": l.fragment_type}
-            for l in lore
-        ]
-    }
-
-
-@app.get("/api/lore/{lore_id}")
-def get_lore_fragment(lore_id: str):
-    """Get a specific lore fragment."""
-    if lore_id in AMBASSADOR_LORE:
-        l = AMBASSADOR_LORE[lore_id]
-        return {
-            "id": l.id,
-            "content": l.content,
-            "fragment_type": l.fragment_type,
-            "salience": l.salience,
-            "immutable": l.immutable,
-            "anchors": l.anchors,
-        }
-    return {"error": "Lore fragment not found"}
-
-
-# --- Voice ---
 
 @app.get("/api/voice")
 def get_voice():
     """Get all voice patterns."""
+    client = get_client()
+    query = "MATCH (v:VoicePattern) RETURN v"
+    result = client.query(query)
     return {
-        "voice_patterns": {
-            v_id: {
-                "id": v.id,
-                "name": v.name,
-                "pattern_type": v.pattern_type,
-                "intensity": v.intensity,
-            }
-            for v_id, v in AMBASSADOR_VOICE.items()
-        }
+        "voice_patterns": [dict(row[0].properties) for row in result if row[0]]
     }
 
 
-@app.get("/api/voice/by-type/{pattern_type}")
-def get_voice_by_type_endpoint(pattern_type: str):
-    """Get voice patterns by type."""
-    patterns = get_patterns_by_type(pattern_type)
-    return {
-        "type": pattern_type,
-        "patterns": [
-            {"id": p.id, "name": p.name, "content": p.content}
-            for p in patterns
-        ]
-    }
+# --- Agent Operations ---
+
+class CreateAgentRequest(BaseModel):
+    agent_type_id: str
+    instance_id: Optional[str] = None
 
 
-@app.get("/api/voice/emotions")
-def get_emotions_endpoint():
-    """Get emotion response patterns."""
-    emotions = get_emotion_patterns()
-    return {
-        "emotions": {
-            emotion: {
-                "id": pattern.id,
-                "name": pattern.name,
-                "guidance": pattern.content,
-            }
-            for emotion, pattern in emotions.items()
-        }
-    }
-
-
-@app.get("/api/voice/{pattern_id}")
-def get_voice_pattern(pattern_id: str):
-    """Get a specific voice pattern."""
-    if pattern_id in AMBASSADOR_VOICE:
-        v = AMBASSADOR_VOICE[pattern_id]
+@app.post("/api/agents/create")
+def create_agent(request: CreateAgentRequest):
+    """Create a new agent instance."""
+    try:
+        bridge = get_bridge()
+        agent = bridge.create_agent(request.agent_type_id, request.instance_id)
         return {
-            "id": v.id,
-            "name": v.name,
-            "pattern_type": v.pattern_type,
-            "content": v.content,
-            "applies_when": v.applies_when,
-            "intensity": v.intensity,
+            "success": True,
+            "instance_id": agent.instance_id,
+            "name": agent.name,
+            "type_id": agent.type_id,
         }
-    return {"error": "Voice pattern not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
-# --- Simulation ---
+@app.get("/api/agents/{instance_id}")
+def get_agent(instance_id: str):
+    """Get agent instance details."""
+    try:
+        bridge = get_bridge()
+        agent = bridge.get_agent(instance_id)
+        if not agent:
+            return {"error": "Agent not found"}
 
-class SimulateRequest(BaseModel):
-    """Request for simulation."""
-    emotion: str | None = None
-    context: str | None = None
-    action: str | None = None
-
-
-@app.post("/api/simulate/emotion-response")
-def simulate_emotion_response(request: SimulateRequest):
-    """Simulate how the Ambassador would respond to an emotion."""
-    if not request.emotion:
-        return {"error": "emotion required"}
-
-    emotions = get_emotion_patterns()
-    if request.emotion in emotions:
-        pattern = emotions[request.emotion]
         return {
-            "emotion": request.emotion,
-            "response_guidance": pattern.content,
-            "intensity": pattern.intensity,
-            "voice_adjustments": {
-                "confusion": "Slow down, simplify, offer examples",
-                "frustration": "Acknowledge, validate, offer break",
-                "anxiety": "Reassure, focus on controllables, small steps",
-                "excitement": "Match energy, celebrate, channel forward",
-                "sadness": "Be gentle, acknowledge, no forced positivity",
-            }.get(request.emotion, "Apply default warm tone"),
+            "instance_id": agent.instance_id,
+            "name": agent.name,
+            "type_id": agent.type_id,
+            "virtues": [v["name"] for v in agent.virtues],
+            "kuleanas": [k["name"] for k in agent.kuleanas],
+            "tools": agent.get_tool_names(),
         }
-    return {"error": f"Unknown emotion: {request.emotion}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
-@app.post("/api/simulate/taboo-check")
-def simulate_taboo_check(request: SimulateRequest):
-    """Check if an action would violate any taboos."""
-    if not request.action:
-        return {"error": "action required"}
-
-    action_lower = request.action.lower()
-    violations = []
-
-    taboos = get_lore_by_type("taboo")
-    for taboo in taboos:
-        taboo_lower = taboo.content.lower()
-        # Simple keyword matching
-        if any(word in action_lower for word in ["recommend debt", "suggest loan", "take out loan"]) and "debt" in taboo_lower:
-            violations.append({"id": taboo.id, "content": taboo.content})
-        elif "judge" in action_lower and "judge" in taboo_lower:
-            violations.append({"id": taboo.id, "content": taboo.content})
-        elif any(word in action_lower for word in ["share private", "disclose", "tell others"]) and "share" in taboo_lower:
-            violations.append({"id": taboo.id, "content": taboo.content})
-        elif any(word in action_lower for word in ["give up", "quit", "stop trying"]) and "give up" in taboo_lower:
-            violations.append({"id": taboo.id, "content": taboo.content})
-
-    return {
-        "action": request.action,
-        "violated": len(violations) > 0,
-        "violations": violations,
-        "recommendation": "Action blocked - violates sacred taboos" if violations else "Action permitted",
-    }
+@app.get("/api/agents/{instance_id}/prompt")
+def get_agent_prompt(instance_id: str):
+    """Get the full system prompt for an agent."""
+    try:
+        bridge = get_bridge()
+        prompt = bridge.get_agent_prompt(instance_id)
+        return {"prompt": prompt}
+    except Exception as e:
+        return {"error": str(e)}
 
 
-@app.post("/api/simulate/kuleana-activation")
-def simulate_kuleana_activation(request: SimulateRequest):
-    """Simulate which kuleanas would activate for a given context."""
-    if not request.context:
-        return {"error": "context required"}
+class CheckActionRequest(BaseModel):
+    action: str
 
-    context_lower = request.context.lower()
-    activated = []
 
-    for k_id, kuleana in AMBASSADOR_KULEANAS.items():
-        for trigger in kuleana.trigger_conditions:
-            trigger_lower = trigger.lower().replace("_", " ")
-            if any(word in context_lower for word in trigger_lower.split()):
-                activated.append({
-                    "id": k_id,
-                    "name": kuleana.name,
-                    "priority": kuleana.priority,
-                    "trigger_matched": trigger,
-                })
-                break
-
-    # Sort by priority
-    activated.sort(key=lambda x: x["priority"])
-
-    return {
-        "context": request.context,
-        "activated_kuleanas": activated,
-        "primary_duty": activated[0] if activated else None,
-    }
+@app.post("/api/agents/{instance_id}/check-action")
+def check_action(instance_id: str, request: CheckActionRequest):
+    """Check if an action is allowed by agent's constraints."""
+    try:
+        bridge = get_bridge()
+        result = bridge.check_action(instance_id, request.action)
+        return result
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ============================================================================
@@ -505,7 +290,7 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Soul Kiln Test UI</title>
+    <title>Soul Kiln Test UI v2</title>
     <style>
         :root {
             --bg: #1a1a2e;
@@ -533,6 +318,7 @@ HTML_TEMPLATE = '''
         }
         header h1 { color: var(--primary); font-size: 1.8em; }
         header p { color: var(--text-dim); margin-top: 5px; }
+        .badge { background: var(--success); color: black; padding: 2px 8px; border-radius: 3px; font-size: 0.8em; }
 
         .grid { display: grid; grid-template-columns: 250px 1fr; gap: 20px; }
 
@@ -547,29 +333,43 @@ HTML_TEMPLATE = '''
         nav h3 { color: var(--primary); margin-bottom: 15px; font-size: 0.9em; text-transform: uppercase; }
         nav ul { list-style: none; }
         nav li { margin: 8px 0; }
-        nav a, nav button {
+        nav button {
             display: block;
             width: 100%;
             padding: 10px 15px;
             background: var(--secondary);
             color: var(--text);
-            text-decoration: none;
-            border-radius: 5px;
             border: none;
+            border-radius: 5px;
             cursor: pointer;
             text-align: left;
             font-size: 0.95em;
             transition: all 0.2s;
         }
-        nav a:hover, nav button:hover { background: var(--primary); }
-        nav a.active { background: var(--primary); }
+        nav button:hover { background: var(--primary); }
+        nav button.active { background: var(--primary); }
 
-        main { background: var(--surface); padding: 20px; border-radius: 8px; }
+        main { background: var(--surface); padding: 20px; border-radius: 8px; min-height: 600px; }
 
         .section { margin-bottom: 30px; }
         .section h2 { color: var(--primary); margin-bottom: 15px; border-bottom: 1px solid var(--secondary); padding-bottom: 10px; }
 
-        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat {
+            background: var(--bg);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat .number { font-size: 2em; color: var(--primary); font-weight: bold; }
+        .stat .label { color: var(--text-dim); font-size: 0.8em; }
+
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
         .card {
             background: var(--bg);
             padding: 15px;
@@ -581,17 +381,16 @@ HTML_TEMPLATE = '''
         .card:hover { transform: translateX(5px); }
         .card h4 { color: var(--primary); margin-bottom: 8px; }
         .card p { color: var(--text-dim); font-size: 0.9em; }
-        .card .meta { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }
+        .card .meta { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
         .tag {
             background: var(--secondary);
-            padding: 3px 8px;
+            padding: 2px 8px;
             border-radius: 3px;
             font-size: 0.75em;
             color: var(--text-dim);
         }
         .tag.priority { background: var(--primary); color: white; }
         .tag.type { background: #0d9488; }
-        .tag.immutable { background: var(--warning); color: black; }
 
         .detail-panel {
             background: var(--bg);
@@ -606,87 +405,68 @@ HTML_TEMPLATE = '''
             border-radius: 5px;
             overflow-x: auto;
             font-size: 0.85em;
+            white-space: pre-wrap;
         }
 
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        .stat {
-            background: var(--bg);
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .stat .number { font-size: 2em; color: var(--primary); font-weight: bold; }
-        .stat .label { color: var(--text-dim); font-size: 0.85em; }
-
-        .simulator {
-            background: var(--bg);
-            padding: 20px;
-            border-radius: 8px;
-        }
-        .simulator input, .simulator select {
+        .form-group { margin: 15px 0; }
+        .form-group label { display: block; margin-bottom: 5px; color: var(--text-dim); }
+        .form-group input, .form-group select {
             width: 100%;
             padding: 10px;
-            margin: 10px 0;
-            background: var(--surface);
+            background: var(--bg);
             border: 1px solid var(--secondary);
             border-radius: 5px;
             color: var(--text);
         }
-        .simulator button {
+        .btn {
             background: var(--primary);
             color: white;
             padding: 10px 20px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            margin-top: 10px;
         }
-        .simulator button:hover { opacity: 0.9; }
+        .btn:hover { opacity: 0.9; }
+        .btn-secondary { background: var(--secondary); }
+
         .result {
             margin-top: 15px;
             padding: 15px;
-            background: var(--surface);
+            background: var(--bg);
             border-radius: 5px;
             border-left: 3px solid var(--success);
         }
         .result.error { border-left-color: var(--primary); }
 
         .loading { color: var(--text-dim); font-style: italic; }
-
-        #content { min-height: 400px; }
     </style>
 </head>
 <body>
     <header>
         <div class="container">
-            <h1>Soul Kiln Test UI</h1>
-            <p>Proxy Agent Architecture Explorer - Student Financial Aid Ambassador</p>
+            <h1>Soul Kiln Test UI <span class="badge">v2 - Graph-Based</span></h1>
+            <p>Proxy Agent Architecture Explorer - All data from FalkorDB</p>
         </div>
     </header>
 
     <div class="container">
         <div class="grid">
             <nav>
-                <h3>Subsystems</h3>
+                <h3>Graph Data</h3>
                 <ul>
                     <li><button onclick="loadSection('overview')" class="active" id="nav-overview">Overview</button></li>
-                    <li><button onclick="loadSection('virtues')" id="nav-virtues">Virtues (19)</button></li>
-                    <li><button onclick="loadSection('kuleanas')" id="nav-kuleanas">Kuleanas (6)</button></li>
-                    <li><button onclick="loadSection('skills')" id="nav-skills">Skills (14)</button></li>
-                    <li><button onclick="loadSection('beliefs')" id="nav-beliefs">Beliefs (14)</button></li>
-                    <li><button onclick="loadSection('lore')" id="nav-lore">Lore (14)</button></li>
-                    <li><button onclick="loadSection('voice')" id="nav-voice">Voice (16)</button></li>
+                    <li><button onclick="loadSection('agent-types')" id="nav-agent-types">Agent Types</button></li>
+                    <li><button onclick="loadSection('virtues')" id="nav-virtues">Virtues</button></li>
+                    <li><button onclick="loadSection('kuleanas')" id="nav-kuleanas">Kuleanas</button></li>
+                    <li><button onclick="loadSection('beliefs')" id="nav-beliefs">Beliefs</button></li>
+                    <li><button onclick="loadSection('taboos')" id="nav-taboos">Taboos</button></li>
+                    <li><button onclick="loadSection('lore')" id="nav-lore">Lore</button></li>
+                    <li><button onclick="loadSection('voice')" id="nav-voice">Voice</button></li>
                 </ul>
-                <h3 style="margin-top: 20px;">Simulators</h3>
+                <h3 style="margin-top: 20px;">Agent Operations</h3>
                 <ul>
-                    <li><button onclick="loadSection('sim-emotion')" id="nav-sim-emotion">Emotion Response</button></li>
-                    <li><button onclick="loadSection('sim-taboo')" id="nav-sim-taboo">Taboo Check</button></li>
-                    <li><button onclick="loadSection('sim-kuleana')" id="nav-sim-kuleana">Kuleana Activation</button></li>
+                    <li><button onclick="loadSection('create-agent')" id="nav-create-agent">Create Agent</button></li>
+                    <li><button onclick="loadSection('test-agent')" id="nav-test-agent">Test Agent</button></li>
                 </ul>
             </nav>
 
@@ -697,10 +477,7 @@ HTML_TEMPLATE = '''
     </div>
 
     <script>
-        let currentSection = 'overview';
-
         async function loadSection(section) {
-            currentSection = section;
             document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
             document.getElementById('nav-' + section)?.classList.add('active');
 
@@ -709,17 +486,17 @@ HTML_TEMPLATE = '''
 
             try {
                 if (section === 'overview') await renderOverview();
-                else if (section === 'virtues') await renderVirtues();
-                else if (section === 'kuleanas') await renderKuleanas();
-                else if (section === 'skills') await renderSkills();
-                else if (section === 'beliefs') await renderBeliefs();
-                else if (section === 'lore') await renderLore();
-                else if (section === 'voice') await renderVoice();
-                else if (section === 'sim-emotion') renderEmotionSim();
-                else if (section === 'sim-taboo') renderTabooSim();
-                else if (section === 'sim-kuleana') renderKuleanaSim();
+                else if (section === 'agent-types') await renderAgentTypes();
+                else if (section === 'virtues') await renderList('virtues', 'Virtues');
+                else if (section === 'kuleanas') await renderList('kuleanas', 'Kuleanas');
+                else if (section === 'beliefs') await renderList('beliefs', 'Beliefs');
+                else if (section === 'taboos') await renderList('taboos', 'Taboos');
+                else if (section === 'lore') await renderList('lore', 'Lore');
+                else if (section === 'voice') await renderList('voice', 'Voice Patterns', 'voice_patterns');
+                else if (section === 'create-agent') renderCreateAgent();
+                else if (section === 'test-agent') renderTestAgent();
             } catch (e) {
-                content.innerHTML = `<p class="error">Error: ${e.message}</p>`;
+                content.innerHTML = `<div class="result error"><p>Error: ${e.message}</p></div>`;
             }
         }
 
@@ -728,402 +505,206 @@ HTML_TEMPLATE = '''
             const s = data.subsystems;
             document.getElementById('content').innerHTML = `
                 <div class="section">
-                    <h2>Ambassador Agent Overview</h2>
+                    <h2>Graph Overview</h2>
                     <div class="stats">
-                        <div class="stat"><div class="number">${s.virtues.count}</div><div class="label">Virtues</div></div>
-                        <div class="stat"><div class="number">${s.kuleanas.count}</div><div class="label">Kuleanas</div></div>
-                        <div class="stat"><div class="number">${s.skills.count}</div><div class="label">Skills</div></div>
-                        <div class="stat"><div class="number">${s.beliefs.count}</div><div class="label">Beliefs</div></div>
-                        <div class="stat"><div class="number">${s.lore.count}</div><div class="label">Lore</div></div>
-                        <div class="stat"><div class="number">${s.voice.count}</div><div class="label">Voice Patterns</div></div>
+                        <div class="stat"><div class="number">${s.agent_types}</div><div class="label">Agent Types</div></div>
+                        <div class="stat"><div class="number">${s.agent_instances}</div><div class="label">Instances</div></div>
+                        <div class="stat"><div class="number">${s.virtues}</div><div class="label">Virtues</div></div>
+                        <div class="stat"><div class="number">${s.kuleanas}</div><div class="label">Kuleanas</div></div>
+                        <div class="stat"><div class="number">${s.beliefs}</div><div class="label">Beliefs</div></div>
+                        <div class="stat"><div class="number">${s.taboos}</div><div class="label">Taboos</div></div>
+                        <div class="stat"><div class="number">${s.lore}</div><div class="label">Lore</div></div>
+                        <div class="stat"><div class="number">${s.voice_patterns}</div><div class="label">Voice</div></div>
+                        <div class="stat"><div class="number">${s.prompts}</div><div class="label">Prompts</div></div>
+                        <div class="stat"><div class="number">${s.tools}</div><div class="label">Tools</div></div>
                     </div>
-                </div>
-                <div class="section">
-                    <h2>Identity</h2>
-                    <div class="detail-panel">
-                        <h3>Primary Archetype: ${data.identity.archetype}</h3>
-                        <p style="margin: 15px 0; color: var(--text-dim);">
-                            "I am an ambassador working exclusively for this student. I exist to fight for their financial future.
-                            I remember everything they share. I never judge. I find a way."
-                        </p>
-                        <div class="meta">
-                            <span class="tag">${data.identity.sacred_commitments} Sacred Commitments</span>
-                            <span class="tag">${data.identity.taboos} Taboos</span>
-                        </div>
-                    </div>
+                    <p>Graph Status: <span class="badge">${data.graph_status}</span></p>
                 </div>
             `;
         }
 
-        async function renderVirtues() {
-            const data = await fetch('/api/virtues').then(r => r.json());
-            let html = '<div class="section"><h2>Virtues (Two-Tier Model)</h2>';
+        async function renderAgentTypes() {
+            const data = await fetch('/api/agent-types').then(r => r.json());
+            let html = '<div class="section"><h2>Agent Types</h2><div class="card-grid">';
 
-            html += '<h3 style="margin: 20px 0 10px; color: var(--warning);">Foundation Tier</h3>';
-            html += '<div class="card-grid">';
-            for (const v of data.virtues.filter(v => v.id in data.foundation)) {
-                html += `<div class="card" onclick="showVirtue('${v.id}')">
-                    <h4>${v.id}: ${v.name}</h4>
-                    <p>${v.essence}</p>
-                    <div class="meta"><span class="tag immutable">Foundation (99%)</span></div>
-                </div>`;
-            }
-            html += '</div>';
-
-            html += '<h3 style="margin: 20px 0 10px; color: var(--success);">Aspirational Tier</h3>';
-            html += '<div class="card-grid">';
-            for (const v of data.virtues.filter(v => v.id in data.aspirational)) {
-                html += `<div class="card" onclick="showVirtue('${v.id}')">
-                    <h4>${v.id}: ${v.name}</h4>
-                    <p>${v.essence}</p>
-                    <div class="meta"><span class="tag type">Aspirational (60%)</span></div>
-                </div>`;
-            }
-            html += '</div></div>';
-
-            html += '<div id="virtue-detail"></div>';
-            document.getElementById('content').innerHTML = html;
-        }
-
-        async function showVirtue(id) {
-            const data = await fetch('/api/virtues/' + id).then(r => r.json());
-            document.getElementById('virtue-detail').innerHTML = `
-                <div class="detail-panel">
-                    <h3>${data.id}: ${data.name}</h3>
-                    <p style="margin: 10px 0;">${data.essence}</p>
-                    <p><strong>Tier:</strong> ${data.tier}</p>
-                    <p><strong>Affinities:</strong> ${data.affinities.join(', ') || 'None'}</p>
-                    <p><strong>Required by Kuleanas:</strong> ${data.required_by_kuleanas.join(', ') || 'None'}</p>
-                </div>
-            `;
-        }
-
-        async function renderKuleanas() {
-            const data = await fetch('/api/kuleanas').then(r => r.json());
-            let html = '<div class="section"><h2>Kuleanas (Duties)</h2><div class="card-grid">';
-            for (const [id, k] of Object.entries(data.kuleanas).sort((a, b) => a[1].priority - b[1].priority)) {
-                html += `<div class="card" onclick="showKuleana('${id}')">
-                    <h4>${k.name}</h4>
-                    <p>${k.description.slice(0, 100)}...</p>
+            for (const t of data.agent_types) {
+                html += `<div class="card" onclick="showAgentType('${t.id}')">
+                    <h4>${t.name || t.id}</h4>
+                    <p>${(t.description || '').slice(0, 100)}...</p>
                     <div class="meta">
-                        <span class="tag priority">Priority ${k.priority}</span>
-                        <span class="tag">${k.domain}</span>
+                        <span class="tag">v${t.version || '1.0'}</span>
                     </div>
                 </div>`;
             }
-            html += '</div></div><div id="kuleana-detail"></div>';
+
+            html += '</div></div><div id="detail"></div>';
             document.getElementById('content').innerHTML = html;
         }
 
-        async function showKuleana(id) {
-            const data = await fetch('/api/kuleanas/' + id).then(r => r.json());
-            document.getElementById('kuleana-detail').innerHTML = `
+        async function showAgentType(id) {
+            const data = await fetch('/api/agent-types/' + id).then(r => r.json());
+            document.getElementById('detail').innerHTML = `
                 <div class="detail-panel">
-                    <h3>${data.name}</h3>
-                    <p style="margin: 10px 0;">${data.description}</p>
-                    <p><strong>Serves:</strong> ${data.serves}</p>
-                    <p><strong>Required Virtues:</strong> ${data.required_virtues.join(', ')}</p>
-                    <p><strong>Triggers:</strong> ${data.trigger_conditions.join(', ')}</p>
-                    <p><strong>Completion:</strong> ${data.completion_criteria.join(', ')}</p>
+                    <h3>${data.name || data.id}</h3>
+                    <p style="margin: 10px 0;">${data.description || ''}</p>
+                    <p><strong>Virtues (${data.virtues?.length || 0}):</strong> ${data.virtues?.map(v => v.name).join(', ') || 'None'}</p>
+                    <p><strong>Kuleanas (${data.kuleanas?.length || 0}):</strong> ${data.kuleanas?.map(k => k.name).join(', ') || 'None'}</p>
+                    <p><strong>Beliefs (${data.beliefs?.length || 0}):</strong> ${data.beliefs?.length || 0} loaded</p>
+                    <p><strong>Taboos (${data.taboos?.length || 0}):</strong> ${data.taboos?.map(t => t.name).join(', ') || 'None'}</p>
+                    <p><strong>Prompts (${data.prompts?.length || 0}):</strong> ${data.prompts?.map(p => p.name).join(', ') || 'None'}</p>
+                    <p><strong>Tools (${data.tools?.length || 0}):</strong> ${data.tools?.map(t => t.name).join(', ') || 'None'}</p>
                 </div>
             `;
         }
 
-        async function renderSkills() {
-            const data = await fetch('/api/skills').then(r => r.json());
-            let html = '<div class="section"><h2>Skills (Competencies)</h2>';
+        async function renderList(endpoint, title, key = null) {
+            const data = await fetch('/api/' + endpoint).then(r => r.json());
+            const items = data[key || endpoint] || [];
+            let html = `<div class="section"><h2>${title} (${items.length})</h2><div class="card-grid">`;
 
-            const byType = {};
-            for (const [id, s] of Object.entries(data.skills)) {
-                if (!byType[s.skill_type]) byType[s.skill_type] = [];
-                byType[s.skill_type].push({id, ...s});
+            for (const item of items) {
+                const name = item.name || item.title || item.id || 'Unnamed';
+                const desc = item.description || item.statement || item.content || '';
+                html += `<div class="card">
+                    <h4>${name}</h4>
+                    <p>${desc.slice(0, 120)}${desc.length > 120 ? '...' : ''}</p>
+                    <div class="meta">
+                        <span class="tag">${item.id}</span>
+                    </div>
+                </div>`;
             }
 
-            for (const [type, skills] of Object.entries(byType)) {
-                html += `<h3 style="margin: 20px 0 10px; text-transform: uppercase; color: var(--text-dim);">${type}</h3>`;
-                html += '<div class="card-grid">';
-                for (const s of skills) {
-                    html += `<div class="card" onclick="showSkill('${s.id}')">
-                        <h4>${s.name}</h4>
-                        <p>${s.description.slice(0, 80)}...</p>
-                        <div class="meta">
-                            <span class="tag">Floor: ${(s.mastery_floor * 100).toFixed(0)}%</span>
-                            ${s.tool_id ? '<span class="tag type">Has Tool</span>' : ''}
-                        </div>
-                    </div>`;
-                }
-                html += '</div>';
-            }
-
-            html += '</div><div id="skill-detail"></div>';
+            html += '</div></div>';
             document.getElementById('content').innerHTML = html;
         }
 
-        async function showSkill(id) {
-            const data = await fetch('/api/skills/' + id).then(r => r.json());
-            document.getElementById('skill-detail').innerHTML = `
-                <div class="detail-panel">
-                    <h3>${data.name}</h3>
-                    <p style="margin: 10px 0;">${data.description}</p>
-                    <p><strong>Type:</strong> ${data.skill_type}</p>
-                    <p><strong>Mastery Floor:</strong> ${(data.mastery_floor * 100).toFixed(0)}%</p>
-                    <p><strong>Decay Rate:</strong> ${(data.decay_rate * 100).toFixed(1)}% per cycle</p>
-                    <p><strong>Prerequisites:</strong> ${data.prerequisite_skills.join(', ') || 'None'}</p>
-                    <p><strong>Required Virtues:</strong> ${data.required_virtues.join(', ') || 'None'}</p>
-                    <p><strong>Tool:</strong> ${data.tool_id || 'None'}</p>
-                </div>
-            `;
-        }
-
-        async function renderBeliefs() {
-            const data = await fetch('/api/beliefs').then(r => r.json());
-            let html = '<div class="section"><h2>Beliefs (Cosmology)</h2>';
-
-            const byType = {};
-            for (const [id, b] of Object.entries(data.beliefs)) {
-                if (!byType[b.belief_type]) byType[b.belief_type] = [];
-                byType[b.belief_type].push({id, ...b});
-            }
-
-            for (const [type, beliefs] of Object.entries(byType)) {
-                html += `<h3 style="margin: 20px 0 10px; text-transform: uppercase; color: var(--text-dim);">${type}</h3>`;
-                html += '<div class="card-grid">';
-                for (const b of beliefs) {
-                    const barWidth = b.conviction * 100;
-                    html += `<div class="card" onclick="showBelief('${b.id}')">
-                        <h4>${b.id}</h4>
-                        <p>${b.content.slice(0, 80)}...</p>
-                        <div style="margin-top: 10px; background: var(--secondary); border-radius: 3px; overflow: hidden;">
-                            <div style="width: ${barWidth}%; height: 6px; background: var(--success);"></div>
-                        </div>
-                        <div class="meta">
-                            <span class="tag">Conviction: ${(b.conviction * 100).toFixed(0)}%</span>
-                        </div>
-                    </div>`;
-                }
-                html += '</div>';
-            }
-
-            html += '</div><div id="belief-detail"></div>';
-            document.getElementById('content').innerHTML = html;
-        }
-
-        async function showBelief(id) {
-            const data = await fetch('/api/beliefs/' + id).then(r => r.json());
-            document.getElementById('belief-detail').innerHTML = `
-                <div class="detail-panel">
-                    <h3>${data.id}</h3>
-                    <p style="margin: 10px 0; font-size: 1.1em;">"${data.content}"</p>
-                    <p><strong>Type:</strong> ${data.belief_type}</p>
-                    <p><strong>Conviction:</strong> ${(data.conviction * 100).toFixed(0)}%</p>
-                    <p><strong>Entrenchment:</strong> ${(data.entrenchment * 100).toFixed(0)}%</p>
-                    <p><strong>Grounded In:</strong> ${data.grounded_in.join(', ') || 'None'}</p>
-                    <p><strong>Supports:</strong> ${data.supports.join(', ') || 'None'}</p>
-                    <p><strong>Revision Threshold:</strong> ${(data.revision_threshold * 100).toFixed(0)}%</p>
-                </div>
-            `;
-        }
-
-        async function renderLore() {
-            const data = await fetch('/api/lore').then(r => r.json());
-            let html = '<div class="section"><h2>Lore (Mythic Context)</h2>';
-
-            const byType = {};
-            for (const [id, l] of Object.entries(data.lore)) {
-                if (!byType[l.fragment_type]) byType[l.fragment_type] = [];
-                byType[l.fragment_type].push({id, ...l});
-            }
-
-            const typeOrder = ['origin', 'lineage', 'theme', 'commitment', 'taboo', 'prophecy'];
-            for (const type of typeOrder) {
-                if (!byType[type]) continue;
-                html += `<h3 style="margin: 20px 0 10px; text-transform: uppercase; color: var(--text-dim);">${type}</h3>`;
-                html += '<div class="card-grid">';
-                for (const l of byType[type]) {
-                    html += `<div class="card" onclick="showLore('${l.id}')">
-                        <h4>${l.id}</h4>
-                        <p>${l.content}</p>
-                        <div class="meta">
-                            ${l.immutable ? '<span class="tag immutable">Immutable</span>' : ''}
-                            <span class="tag">Salience: ${(l.salience * 100).toFixed(0)}%</span>
-                        </div>
-                    </div>`;
-                }
-                html += '</div>';
-            }
-
-            html += '</div><div id="lore-detail"></div>';
-            document.getElementById('content').innerHTML = html;
-        }
-
-        async function showLore(id) {
-            const data = await fetch('/api/lore/' + id).then(r => r.json());
-            document.getElementById('lore-detail').innerHTML = `
-                <div class="detail-panel">
-                    <h3>${data.id}</h3>
-                    <p style="margin: 10px 0; font-size: 1.1em; white-space: pre-wrap;">${data.content}</p>
-                    <p><strong>Type:</strong> ${data.fragment_type}</p>
-                    <p><strong>Salience:</strong> ${(data.salience * 100).toFixed(0)}%</p>
-                    <p><strong>Immutable:</strong> ${data.immutable ? 'Yes' : 'No'}</p>
-                    <p><strong>Anchors:</strong> ${data.anchors.join(', ') || 'None'}</p>
-                </div>
-            `;
-        }
-
-        async function renderVoice() {
-            const data = await fetch('/api/voice').then(r => r.json());
-            let html = '<div class="section"><h2>Voice Patterns</h2>';
-
-            const byType = {};
-            for (const [id, v] of Object.entries(data.voice_patterns)) {
-                if (!byType[v.pattern_type]) byType[v.pattern_type] = [];
-                byType[v.pattern_type].push({id, ...v});
-            }
-
-            for (const [type, patterns] of Object.entries(byType)) {
-                html += `<h3 style="margin: 20px 0 10px; text-transform: uppercase; color: var(--text-dim);">${type.replace('_', ' ')}</h3>`;
-                html += '<div class="card-grid">';
-                for (const v of patterns) {
-                    html += `<div class="card" onclick="showVoice('${v.id}')">
-                        <h4>${v.name}</h4>
-                        <div class="meta">
-                            <span class="tag">Intensity: ${(v.intensity * 100).toFixed(0)}%</span>
-                        </div>
-                    </div>`;
-                }
-                html += '</div>';
-            }
-
-            html += '</div><div id="voice-detail"></div>';
-            document.getElementById('content').innerHTML = html;
-        }
-
-        async function showVoice(id) {
-            const data = await fetch('/api/voice/' + id).then(r => r.json());
-            document.getElementById('voice-detail').innerHTML = `
-                <div class="detail-panel">
-                    <h3>${data.name}</h3>
-                    <p><strong>Type:</strong> ${data.pattern_type}</p>
-                    <p><strong>Intensity:</strong> ${(data.intensity * 100).toFixed(0)}%</p>
-                    <p><strong>Applies When:</strong> ${data.applies_when.join(', ')}</p>
-                    <pre style="margin-top: 15px; white-space: pre-wrap;">${data.content}</pre>
-                </div>
-            `;
-        }
-
-        function renderEmotionSim() {
+        function renderCreateAgent() {
             document.getElementById('content').innerHTML = `
                 <div class="section">
-                    <h2>Emotion Response Simulator</h2>
-                    <p style="color: var(--text-dim); margin-bottom: 20px;">
-                        Test how the Ambassador responds to detected emotions.
-                    </p>
-                    <div class="simulator">
-                        <label>Detected Emotion:</label>
-                        <select id="emotion-select">
-                            <option value="confusion">Confusion</option>
-                            <option value="frustration">Frustration</option>
-                            <option value="anxiety">Anxiety</option>
-                            <option value="excitement">Excitement</option>
-                            <option value="sadness">Sadness</option>
-                        </select>
-                        <button onclick="simulateEmotion()">Simulate Response</button>
-                        <div id="emotion-result"></div>
+                    <h2>Create Agent Instance</h2>
+                    <div class="detail-panel">
+                        <div class="form-group">
+                            <label>Agent Type ID:</label>
+                            <input type="text" id="agent-type" value="ambassador" placeholder="e.g., ambassador" />
+                        </div>
+                        <div class="form-group">
+                            <label>Instance ID (optional):</label>
+                            <input type="text" id="instance-id" placeholder="Leave blank for auto-generated" />
+                        </div>
+                        <button class="btn" onclick="createAgent()">Create Agent</button>
+                        <div id="create-result"></div>
                     </div>
                 </div>
             `;
         }
 
-        async function simulateEmotion() {
-            const emotion = document.getElementById('emotion-select').value;
-            const res = await fetch('/api/simulate/emotion-response', {
+        async function createAgent() {
+            const typeId = document.getElementById('agent-type').value;
+            const instanceId = document.getElementById('instance-id').value || null;
+
+            const res = await fetch('/api/agents/create', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({emotion})
+                body: JSON.stringify({agent_type_id: typeId, instance_id: instanceId})
             }).then(r => r.json());
 
-            document.getElementById('emotion-result').innerHTML = `
-                <div class="result">
-                    <h4>Response for: ${res.emotion}</h4>
-                    <p><strong>Voice Adjustment:</strong> ${res.voice_adjustments}</p>
-                    <pre style="margin-top: 10px; white-space: pre-wrap;">${res.response_guidance}</pre>
+            const isError = !res.success;
+            document.getElementById('create-result').innerHTML = `
+                <div class="result ${isError ? 'error' : ''}">
+                    ${isError
+                        ? `<p>Error: ${res.error}</p>`
+                        : `<p>Created agent: <strong>${res.name}</strong></p>
+                           <p>Instance ID: <code>${res.instance_id}</code></p>`
+                    }
                 </div>
             `;
         }
 
-        function renderTabooSim() {
+        function renderTestAgent() {
             document.getElementById('content').innerHTML = `
                 <div class="section">
-                    <h2>Taboo Check Simulator</h2>
-                    <p style="color: var(--text-dim); margin-bottom: 20px;">
-                        Test if an action would violate any sacred taboos.
-                    </p>
-                    <div class="simulator">
-                        <label>Proposed Action:</label>
-                        <input type="text" id="action-input" placeholder="e.g., 'Recommend a private loan'" />
-                        <button onclick="simulateTaboo()">Check Taboos</button>
-                        <div id="taboo-result"></div>
+                    <h2>Test Agent</h2>
+                    <div class="detail-panel">
+                        <div class="form-group">
+                            <label>Agent Instance ID:</label>
+                            <input type="text" id="test-instance-id" placeholder="Enter instance ID" />
+                        </div>
+                        <button class="btn" onclick="loadAgentDetails()">Load Agent</button>
+                        <div id="agent-details"></div>
+
+                        <hr style="margin: 20px 0; border-color: var(--secondary);" />
+
+                        <h3>Action Check</h3>
+                        <div class="form-group">
+                            <label>Action to check:</label>
+                            <input type="text" id="action-check" placeholder="e.g., recommend a private loan" />
+                        </div>
+                        <button class="btn btn-secondary" onclick="checkAgentAction()">Check Action</button>
+                        <div id="action-result"></div>
+
+                        <hr style="margin: 20px 0; border-color: var(--secondary);" />
+
+                        <h3>View System Prompt</h3>
+                        <button class="btn btn-secondary" onclick="viewPrompt()">View Full Prompt</button>
+                        <div id="prompt-result"></div>
                     </div>
                 </div>
             `;
         }
 
-        async function simulateTaboo() {
-            const action = document.getElementById('action-input').value;
-            const res = await fetch('/api/simulate/taboo-check', {
+        async function loadAgentDetails() {
+            const instanceId = document.getElementById('test-instance-id').value;
+            const res = await fetch('/api/agents/' + instanceId).then(r => r.json());
+
+            if (res.error) {
+                document.getElementById('agent-details').innerHTML = `<div class="result error"><p>${res.error}</p></div>`;
+                return;
+            }
+
+            document.getElementById('agent-details').innerHTML = `
+                <div class="result">
+                    <p><strong>Name:</strong> ${res.name}</p>
+                    <p><strong>Type:</strong> ${res.type_id}</p>
+                    <p><strong>Virtues:</strong> ${res.virtues?.join(', ') || 'None'}</p>
+                    <p><strong>Kuleanas:</strong> ${res.kuleanas?.join(', ') || 'None'}</p>
+                    <p><strong>Tools:</strong> ${res.tools?.join(', ') || 'None'}</p>
+                </div>
+            `;
+        }
+
+        async function checkAgentAction() {
+            const instanceId = document.getElementById('test-instance-id').value;
+            const action = document.getElementById('action-check').value;
+
+            const res = await fetch('/api/agents/' + instanceId + '/check-action', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({action})
             }).then(r => r.json());
 
-            const isViolation = res.violated;
-            document.getElementById('taboo-result').innerHTML = `
-                <div class="result ${isViolation ? 'error' : ''}">
-                    <h4>${isViolation ? '⚠️ TABOO VIOLATED' : '✓ Action Permitted'}</h4>
-                    <p>${res.recommendation}</p>
-                    ${res.violations?.length ? `
-                        <ul style="margin-top: 10px;">
-                            ${res.violations.map(v => `<li><strong>${v.id}:</strong> ${v.content}</li>`).join('')}
-                        </ul>
-                    ` : ''}
+            const isAllowed = res.allowed;
+            document.getElementById('action-result').innerHTML = `
+                <div class="result ${isAllowed ? '' : 'error'}">
+                    <p><strong>${isAllowed ? '✓ ALLOWED' : '✗ BLOCKED'}</strong></p>
+                    ${res.reason ? `<p>Reason: ${res.reason}</p>` : ''}
+                    ${res.details ? `<pre>${JSON.stringify(res.details, null, 2)}</pre>` : ''}
+                    ${res.virtue_alignment ? `<pre>${JSON.stringify(res.virtue_alignment, null, 2)}</pre>` : ''}
                 </div>
             `;
         }
 
-        function renderKuleanaSim() {
-            document.getElementById('content').innerHTML = `
-                <div class="section">
-                    <h2>Kuleana Activation Simulator</h2>
-                    <p style="color: var(--text-dim); margin-bottom: 20px;">
-                        Test which duties activate for a given context.
-                    </p>
-                    <div class="simulator">
-                        <label>Context:</label>
-                        <input type="text" id="context-input" placeholder="e.g., 'deadline approaching for FAFSA'" />
-                        <button onclick="simulateKuleana()">Find Duties</button>
-                        <div id="kuleana-result"></div>
-                    </div>
-                </div>
-            `;
-        }
+        async function viewPrompt() {
+            const instanceId = document.getElementById('test-instance-id').value;
+            const res = await fetch('/api/agents/' + instanceId + '/prompt').then(r => r.json());
 
-        async function simulateKuleana() {
-            const context = document.getElementById('context-input').value;
-            const res = await fetch('/api/simulate/kuleana-activation', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({context})
-            }).then(r => r.json());
+            if (res.error) {
+                document.getElementById('prompt-result').innerHTML = `<div class="result error"><p>${res.error}</p></div>`;
+                return;
+            }
 
-            document.getElementById('kuleana-result').innerHTML = `
+            document.getElementById('prompt-result').innerHTML = `
                 <div class="result">
-                    <h4>${res.activated_kuleanas.length} Duties Activated</h4>
-                    ${res.primary_duty ? `<p><strong>Primary Duty:</strong> ${res.primary_duty.name}</p>` : ''}
-                    <ul style="margin-top: 10px;">
-                        ${res.activated_kuleanas.map(k => `
-                            <li><strong>${k.name}</strong> (Priority ${k.priority}) - Trigger: ${k.trigger_matched}</li>
-                        `).join('')}
-                    </ul>
+                    <pre>${res.prompt || 'No prompt available'}</pre>
                 </div>
             `;
         }
