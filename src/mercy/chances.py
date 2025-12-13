@@ -18,7 +18,6 @@ def get_config():
         with open("config.yml") as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
-        # Default configuration
         return {
             "mercy": {
                 "max_warnings": 3,

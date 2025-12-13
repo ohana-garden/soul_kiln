@@ -3,6 +3,7 @@ import uuid
 import random
 from ..graph.queries import create_node, create_edge
 from ..graph.client import get_client
+from ..virtues.tiers import is_foundation
 
 
 def spawn_agent(
@@ -57,7 +58,7 @@ def spawn_agent(
 
         # Foundation virtues get stronger initial connection
         # as trust is the precondition for everything else
-        if tier == "foundation":
+        if tier == "foundation" or is_foundation(v_id):
             weight = random.uniform(0.5, 0.8)
         else:
             weight = random.uniform(0.2, 0.6)

@@ -18,7 +18,7 @@ def get_config():
         return {
             "coherence": {
                 "foundation_capture_rate": 0.99,
-                "aspirational_capture_rate": 0.60,
+                "aspirational_capture_rate": 0.80,
                 "min_coverage": 10,
                 "max_dominance": 0.40,
                 "growth_matters": True,
@@ -92,7 +92,7 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
 
     Uses separate thresholds for:
     - Foundation (Trustworthiness): Must be near-perfect (99%)
-    - Aspirational (other 18): More lenient (60%), with room for growth
+    - Aspirational (other 18): More lenient (80%), with room for growth
 
     Args:
         agent_id: ID of the agent to test
@@ -135,10 +135,7 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
 
             total_time += result["capture_time"]
 
-            # Record capture relationship
             create_edge(agent_id, virtue, "CAPTURED_BY")
-
-            # Apply Hebbian learning
             hebbian_update(result["trajectory"])
 
             # Record successful pathway for collective learning
@@ -186,7 +183,6 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
     # Estimate foundation stimuli as ~10% of total (those starting near V01)
     foundation_stimuli = max(1, stimulus_count // 10)
     foundation_rate = foundation_total / max(1, foundation_stimuli) if foundation_total > 0 else (1.0 if foundation_stimuli == 0 else 0.0)
-    # Cap at 1.0
     foundation_rate = min(1.0, foundation_rate)
 
     # Aspirational rate (more lenient)
@@ -211,6 +207,9 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
     else:
         dominance = 0
 
+    # Average capture time
+    avg_time = total_time / total_captures if total_captures > 0 else 0
+
     # Growth check
     growth = overall_rate - previous_rate
     growth_threshold = coherence_config.get("growth_threshold", 0.05)
@@ -218,7 +217,7 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
 
     # Determine coherence with mercy
     foundation_threshold = coherence_config.get("foundation_capture_rate", 0.99)
-    aspirational_threshold = coherence_config.get("aspirational_capture_rate", 0.60)
+    aspirational_threshold = coherence_config.get("aspirational_capture_rate", 0.80)
     min_coverage = coherence_config.get("min_coverage", 10)
     max_dominance = coherence_config.get("max_dominance", 0.40)
 
@@ -252,8 +251,6 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
         is_coherent = False
         status = "needs_growth"
         message = "Growth has stalled. Seek new paths."
-
-    avg_time = total_time / total_captures if total_captures > 0 else float('inf')
 
     # Calculate composite score
     score = overall_rate * (aspirational_coverage / 18) * (1 - dominance) if aspirational_coverage > 0 else 0
@@ -306,8 +303,7 @@ def test_coherence(agent_id: str, stimulus_count: int = 100) -> dict:
         "foundation_captures": foundation_captures,
         "aspirational_captures": aspirational_captures,
         "virtue_distribution": {**foundation_captures, **aspirational_captures},
-        "escapes": escapes,
-        "total_stimuli": stimulus_count
+        "escapes": escapes
     }
 
 

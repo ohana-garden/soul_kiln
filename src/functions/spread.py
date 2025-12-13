@@ -1,7 +1,8 @@
-"""Activation spread function."""
+"""Activation spread function with collective learning support."""
 import math
 from ..graph.client import get_client
 from ..graph.queries import get_neighbors, get_node_activation, set_node_activation
+from ..virtues.tiers import is_foundation
 
 
 def tanh(x: float) -> float:
@@ -125,7 +126,7 @@ def spread_activation(
         )
 
         if is_virtue and next_activation >= capture_threshold:
-            tier = is_virtue[0][0] if is_virtue[0] else "aspirational"
+            tier = is_virtue[0][0] if is_virtue[0] else ("foundation" if is_foundation(next_node) else "aspirational")
             return {
                 "trajectory": trajectory,
                 "captured": True,

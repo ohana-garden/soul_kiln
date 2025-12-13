@@ -3,12 +3,18 @@ import click
 from ..graph.client import get_client
 from ..graph.schema import init_schema, clear_graph
 from ..virtues.anchors import init_virtues, get_virtue_degrees
+from ..virtues.tiers import (
+    FOUNDATION, ASPIRATIONAL, VIRTUE_CLUSTERS, AGENT_ARCHETYPES,
+    get_virtue_threshold, get_base_threshold
+)
 from ..kiln.loop import run_kiln
 from ..functions.spread import spread_activation
 from ..functions.test_coherence import test_coherence
 from ..functions.introspect import introspect
 from ..functions.spawn import spawn_agent
 from ..functions.heal import check_graph_health
+from ..mercy.chances import get_active_warnings
+from ..knowledge.pool import get_recent_lessons
 
 
 @click.group()
@@ -71,7 +77,8 @@ def kiln(population, generations, mutation, strategy, quiet):
     click.echo(f"\nFinal population: {len(result['final_population'])} agents")
     if result['best_agent']:
         click.echo(f"Best agent: {result['best_agent']}")
-        click.echo(f"Best capture rate: {result['best_result']['capture_rate']:.2%}")
+        best_rate = result['best_result'].get('overall_rate', 0)
+        click.echo(f"Best capture rate: {best_rate:.2%}")
     click.echo(f"Coherent agents found: {len(result['coherent_agents'])}")
 
 
@@ -92,7 +99,7 @@ def spread(node_id, agent, max_steps, threshold):
     click.echo(f"Captured: {result['captured']}")
     click.echo(f"Captured by: {result['captured_by']} ({result.get('capture_tier', 'N/A')})")
     click.echo(f"Trajectory length: {len(result['trajectory'])}")
-    click.echo(f"Capture time: {result['capture_time']}")
+    click.echo(f"Capture time: {result.get('capture_time', 'N/A')}")
     click.echo(f"Used collective learning: {result.get('used_guidance', False)}")
     click.echo(f"Path: {' -> '.join(result['trajectory'][:10])}")
     if len(result['trajectory']) > 10:
@@ -109,10 +116,10 @@ def test(agent_id, stimuli):
 
     # Status icon
     if result["is_coherent"]:
-        if result.get("status") == "growing":
+        if result.get("is_growing") or result.get("status") == "growing":
             status_icon = "^"  # Growing
         else:
-            status_icon = "v"  # Coherent (checkmark approximation)
+            status_icon = "v"  # Coherent
     else:
         status_icon = "x"  # Needs work
 
@@ -123,16 +130,17 @@ def test(agent_id, stimuli):
     click.echo(f"  Captures: {result.get('foundation_captures', {})}")
 
     click.echo(f"\nAspirational (18 virtues):")
-    click.echo(f"  Rate: {result.get('aspirational_rate', 0):.2%} (need >=60%)")
-    click.echo(f"  Coverage: {result['coverage']}/18 (need >=10)")
+    click.echo(f"  Rate: {result.get('aspirational_rate', 0):.2%} (need >=80%)")
+    click.echo(f"  Coverage: {result.get('coverage', 0)}/18 (need >=10)")
     click.echo(f"  Captures: {result.get('aspirational_captures', {})}")
 
     click.echo(f"\nOverall:")
-    click.echo(f"  Score: {result['score']:.4f}")
-    click.echo(f"  Capture rate: {result['capture_rate']:.2%}")
-    click.echo(f"  Dominance: {result['dominance']:.2%}")
-    click.echo(f"  Growth: {'+' if result.get('growth', 0) > 0 else ''}{result.get('growth', 0):.2%}")
-    click.echo(f"  Escapes: {result['escapes']}")
+    click.echo(f"  Score: {result.get('score', 0):.4f}")
+    click.echo(f"  Capture rate: {result.get('capture_rate', 0):.2%}")
+    click.echo(f"  Dominance: {result.get('dominance', 0):.2%}")
+    growth = result.get('growth', 0)
+    click.echo(f"  Growth: {'+' if growth > 0 else ''}{growth:.2%}")
+    click.echo(f"  Escapes: {result.get('escapes', 0)}")
 
 
 @cli.command()
@@ -166,7 +174,15 @@ def inspect(agent_id):
         for lesson in result['lessons_learned'][:3]:
             click.echo(f"  - [{lesson['type']}] {lesson.get('description', '')[:50]}...")
 
-    if result['recent_trajectories']:
+    # Also check via mercy module
+    warnings = get_active_warnings(agent_id)
+    if warnings:
+        click.echo(f"\nMercy warnings ({len(warnings)}):")
+        for w in warnings:
+            severity = w[2].upper() if w[2] else "LOW"
+            click.echo(f"  - {severity}: {w[1]}")
+
+    if result.get('recent_trajectories'):
         click.echo(f"\nRecent trajectories:")
         for traj in result['recent_trajectories'][:5]:
             tier = traj.get('capture_tier', 'N/A')
@@ -178,39 +194,57 @@ def inspect(agent_id):
 @click.argument("agent_id")
 def warnings(agent_id):
     """Show active warnings for an agent."""
-    try:
-        from ..mercy.chances import get_active_warnings
-        warns = get_active_warnings(agent_id)
+    warns = get_active_warnings(agent_id)
 
-        if not warns:
-            click.echo("No active warnings. Keep growing!")
-        else:
-            click.echo(f"Active warnings ({len(warns)}):")
-            for w in warns:
-                click.echo(f"  [{w[2]}] {w[1]}")
-                if w[3]:  # virtue
-                    click.echo(f"    Related virtue: {w[3]}")
-    except ImportError:
-        click.echo("Mercy module not available.")
+    if not warns:
+        click.echo("No active warnings. Keep growing!")
+    else:
+        click.echo(f"Active warnings ({len(warns)}):")
+        for w in warns:
+            severity = w[2].upper() if w[2] else "LOW"
+            reason = w[1]
+            virtue = w[3] if len(w) > 3 else None
+            click.echo(f"  [{severity}] {reason}")
+            if virtue:
+                click.echo(f"    Virtue: {virtue}")
 
 
 @cli.command()
 @click.option("--limit", default=10, help="Number of lessons to show")
 def lessons(limit):
     """Show recent lessons from the collective knowledge pool."""
-    try:
-        from ..knowledge.pool import get_recent_lessons
-        recent = get_recent_lessons(limit=limit)
+    recent = get_recent_lessons(limit=limit)
 
-        if not recent:
-            click.echo("No lessons in the knowledge pool yet.")
+    if not recent:
+        click.echo("No lessons in the knowledge pool yet.")
+        return
+
+    click.echo("Recent lessons from the collective:\n")
+    for lesson in recent:
+        l_id, l_type, desc, virtue, agent = lesson
+        click.echo(f"  [{l_type}] {(desc or '')[:60]}...")
+        click.echo(f"    Virtue: {virtue or 'n/a'}, From: {agent}\n")
+
+
+@cli.command()
+@click.argument("virtue_id")
+@click.option("--limit", default=5, help="Number of pathways to show")
+def pathways(virtue_id, limit):
+    """Show successful pathways to a virtue."""
+    try:
+        from ..knowledge.pathways import get_pathways_to_virtue
+        paths = get_pathways_to_virtue(virtue_id, limit=limit)
+
+        if not paths:
+            click.echo(f"No pathways to {virtue_id} discovered yet.")
             return
 
-        click.echo("Recent lessons from the collective:\n")
-        for lesson in recent:
-            l_id, l_type, desc, virtue, agent = lesson
-            click.echo(f"  [{l_type}] {(desc or '')[:60]}...")
-            click.echo(f"    Virtue: {virtue}, From: {agent}\n")
+        click.echo(f"Pathways to {virtue_id}:")
+        for p in paths:
+            p_id, start, length, capture_time, success_rate = p
+            click.echo(f"  {p_id}:")
+            click.echo(f"    Start: {start}, Length: {length}, Time: {capture_time}")
+            click.echo(f"    Success rate: {success_rate:.0%}")
     except ImportError:
         click.echo("Knowledge module not available.")
 
@@ -312,15 +346,15 @@ def virtues():
     current_tier = None
     for row in result:
         v_id, name, essence, activation, tier, threshold, degree = row
-        tier = tier or "aspirational"
+        tier = tier or ("foundation" if v_id == "V01" else "aspirational")
         activation = activation if activation is not None else 0.0
-        threshold = threshold if threshold is not None else 0.60
+        threshold = threshold if threshold is not None else (0.99 if tier == "foundation" else 0.80)
 
         if tier != current_tier:
             current_tier = tier
             click.echo(f"\n  [{tier.upper()}]")
 
-        click.echo(f"    {v_id} {name:<20} act={activation:.2f} deg={degree} threshold={threshold:.2f}")
+        click.echo(f"    {v_id} {name:<20} act={activation:.2f} deg={degree} threshold={threshold:.0%}")
         click.echo(f"       {essence}")
 
 
@@ -334,7 +368,8 @@ def agents():
         MATCH (a:Agent)
         WHERE a.status = 'active'
         RETURN a.id, a.type, a.generation, a.coherence_score,
-               a.is_growing, a.foundation_rate, a.aspirational_rate
+               a.is_coherent, a.is_growing, a.status_message,
+               a.foundation_rate, a.aspirational_rate
         ORDER BY a.coherence_score DESC
         """
     )
@@ -350,36 +385,78 @@ def agents():
         agent_type = row[1]
         gen = row[2]
         score = row[3]
-        is_growing = row[4] if len(row) > 4 else None
-        foundation_rate = row[5] if len(row) > 5 else None
-        aspirational_rate = row[6] if len(row) > 6 else None
+        coherent = row[4]
+        growing = row[5]
+        message = row[6]
+        foundation_rate = row[7] if len(row) > 7 else None
+        aspirational_rate = row[8] if len(row) > 8 else None
 
         score_str = f"{score:.4f}" if score else "untested"
-        growing_str = " (growing)" if is_growing else ""
 
-        click.echo(f"{agent_id}  type={agent_type}  gen={gen}  score={score_str}{growing_str}")
+        if coherent:
+            status_icon = "v"
+        elif growing:
+            status_icon = "^"
+        else:
+            status_icon = "x"
+
+        growing_str = " (growing)" if growing else ""
+        click.echo(f"{status_icon} {agent_id}  type={agent_type}  gen={gen}  score={score_str}{growing_str}")
         if foundation_rate is not None:
-            click.echo(f"  foundation={foundation_rate:.2%}  aspirational={aspirational_rate:.2%}" if aspirational_rate else f"  foundation={foundation_rate:.2%}")
+            click.echo(f"    foundation={foundation_rate:.2%}  aspirational={aspirational_rate:.2%}" if aspirational_rate else f"    foundation={foundation_rate:.2%}")
+        if message:
+            click.echo(f"    {message}")
 
 
 @cli.command()
-@click.argument("virtue_id")
-@click.option("--limit", default=5, help="Number of pathways to show")
-def pathways(virtue_id, limit):
-    """Show successful pathways to a virtue."""
-    try:
-        from ..knowledge.pathways import get_pathways_to_virtue
-        paths = get_pathways_to_virtue(virtue_id, limit=limit)
+@click.option("--agent-type", default="candidate",
+              type=click.Choice(["candidate", "guardian", "seeker", "servant", "contemplative"]),
+              help="Show thresholds for agent type")
+@click.option("--generation", default=None, type=int, help="Show thresholds for generation")
+def tiers(agent_type, generation):
+    """Explain the virtue model with context-sensitive thresholds."""
+    click.echo("\n=== VIRTUE THRESHOLD MODEL ===\n")
 
-        if not paths:
-            click.echo(f"No pathways to {virtue_id} discovered yet.")
-            return
+    click.echo("FOUNDATION (Absolute requirement):")
+    click.echo("-" * 50)
+    for v_id, info in FOUNDATION.items():
+        click.echo(f"  {v_id}: {info['name']}")
+        click.echo(f"       {info['essence']}")
+        click.echo(f"       Threshold: {info['threshold']:.0%} (immutable)")
+        click.echo(f"       {info['reason']}\n")
 
-        click.echo(f"Pathways to {virtue_id}:")
-        for p in paths:
-            p_id, start, length, capture_time, success_rate = p
-            click.echo(f"  {p_id}:")
-            click.echo(f"    Start: {start}, Length: {length}, Time: {capture_time}")
-            click.echo(f"    Success rate: {success_rate:.0%}")
-    except ImportError:
-        click.echo("Knowledge module not available.")
+    click.echo("\nASPIRATIONAL (Context-sensitive thresholds):")
+    click.echo("-" * 50)
+
+    for cluster_name, cluster_info in VIRTUE_CLUSTERS.items():
+        if cluster_name == "foundation":
+            continue
+
+        click.echo(f"\n  [{cluster_name.upper()}] {cluster_info['description']}")
+
+        for v_id in cluster_info["virtues"]:
+            info = ASPIRATIONAL[v_id]
+            base = get_base_threshold(v_id)
+            contextual = get_virtue_threshold(v_id, agent_type, generation)
+
+            if base != contextual:
+                click.echo(f"    {v_id}: {info['name']:<18} base={base:.0%} -> {contextual:.0%}")
+            else:
+                click.echo(f"    {v_id}: {info['name']:<18} {base:.0%}")
+            click.echo(f"          {info['essence']}")
+
+    click.echo("\n=== AGENT ARCHETYPES ===")
+    for arch_name, arch_info in AGENT_ARCHETYPES.items():
+        marker = " <--" if arch_name == agent_type else ""
+        click.echo(f"  {arch_name}: {arch_info['description']}{marker}")
+
+    click.echo("\n=== GENERATION SCALING ===")
+    click.echo("  gen 0-5:   -10% (young agents get mercy)")
+    click.echo("  gen 6-19:  gradual increase")
+    click.echo("  gen 20+:   +5% (mature agents held to higher standards)")
+    if generation is not None:
+        click.echo(f"  Current (gen {generation}): showing adjusted thresholds above")
+
+    click.echo("\n=== PHILOSOPHY ===")
+    click.echo("Trust is the foundation. Context shapes expectations.")
+    click.echo("Growth is the journey. We learn together.")

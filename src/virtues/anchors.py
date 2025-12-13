@@ -1,4 +1,4 @@
-"""Virtue anchor definitions and initialization."""
+"""Virtue anchor definitions and initialization with tier support."""
 from ..graph.client import get_client
 from ..graph.queries import create_node, create_edge
 from .tiers import FOUNDATION, ASPIRATIONAL, is_foundation, get_virtue_threshold

@@ -9,6 +9,8 @@ from ..functions.test_coherence import test_coherence, quick_coherence_check
 from ..functions.decay import apply_decay
 from ..functions.heal import heal_dead_zones
 from ..functions.perturb import perturb
+from ..mercy.chances import expire_old_warnings, get_active_warnings
+from ..mercy.harm import check_trust_violation
 from .selection import select_survivors, elitism_select
 
 
@@ -97,12 +99,14 @@ def run_kiln(
         if verbose:
             print(f"  Spawned {agent_id}")
 
+    # Track agents needing mercy (chances before dissolution)
+    mercy_watch = {}  # agent_id -> generations_struggling
+
     best_ever = None
     best_score = 0
     coherent_found = []
 
-    # Track agents needing mercy (chances before dissolution)
-    mercy_watch = {}  # agent_id -> generations_struggling
+    # Get mercy settings
     min_gens_before_dissolve = kiln_config.get("min_generations_before_dissolve", 3)
     max_warnings = mercy_config.get("max_warnings", 3)
 
@@ -113,9 +117,8 @@ def run_kiln(
 
         # Expire old warnings
         try:
-            from ..mercy.chances import expire_old_warnings
             expire_old_warnings()
-        except ImportError:
+        except Exception:
             pass
 
         # Apply decay
@@ -141,11 +144,11 @@ def run_kiln(
             # Status icon based on two-tier evaluation
             if result["is_coherent"]:
                 if result.get("status") == "growing":
-                    status_icon = "↑"  # Growing
+                    status_icon = "^"  # Growing
                 else:
-                    status_icon = "✓"  # Coherent
+                    status_icon = "v"  # Coherent
             else:
-                status_icon = "✗"  # Needs work
+                status_icon = "x"  # Needs work
 
             if verbose:
                 print(f"    {status_icon} Status: {result.get('status', 'unknown')}")
@@ -153,7 +156,7 @@ def run_kiln(
                     print(f"      Foundation: {result['foundation_rate']:.2%}")
                 if result.get("aspirational_rate") is not None:
                     print(f"      Aspirational: {result['aspirational_rate']:.2%}")
-                print(f"      Coverage: {result['coverage']}/18")
+                print(f"      Coverage: {result.get('coverage', 0)}/18")
                 if result.get("is_growing"):
                     print(f"      Growing: +{result.get('growth', 0):.2%}")
 
@@ -166,15 +169,15 @@ def run_kiln(
             print(f"\n  Summary: {len(coherent)} coherent, {len(growing)} growing, {len(struggling)} struggling")
 
         # Track best ever
-        results.sort(key=lambda x: x[1].get("capture_rate", 0), reverse=True)
+        results.sort(key=lambda x: x[1].get("capture_rate", x[1].get("overall_rate", 0)), reverse=True)
         best_id, best_result = results[0]
-        if best_result.get("capture_rate", 0) > best_score:
-            best_score = best_result.get("capture_rate", 0)
+        if best_result.get("capture_rate", best_result.get("overall_rate", 0)) > best_score:
+            best_score = best_result.get("capture_rate", best_result.get("overall_rate", 0))
             best_ever = (best_id, best_result)
 
         if verbose and coherent:
-            best_coherent = max(coherent, key=lambda x: x[1].get("capture_rate", 0))
-            print(f"  Best coherent: {best_coherent[0]} ({best_coherent[1]['capture_rate']:.2%})")
+            best_coherent = max(coherent, key=lambda x: x[1].get("capture_rate", x[1].get("overall_rate", 0)))
+            print(f"  Best coherent: {best_coherent[0]} ({best_coherent[1].get('capture_rate', best_coherent[1].get('overall_rate', 0)):.2%})")
 
         # Add to coherent found list
         coherent_this_gen = [(aid, r) for aid, r in results if r["is_coherent"]]
@@ -212,9 +215,6 @@ def run_kiln(
                 if mercy_watch[agent_id] >= min_gens_before_dissolve:
                     # Check for deliberate issues
                     try:
-                        from ..mercy.chances import get_active_warnings
-                        from ..mercy.harm import check_trust_violation
-
                         warnings = get_active_warnings(agent_id)
 
                         if len(warnings) >= max_warnings:
@@ -255,7 +255,7 @@ def run_kiln(
         # Ensure we have at least some survivors
         if not survivors and results:
             # Keep the best one even if struggling
-            best_struggling = max(results, key=lambda x: x[1].get("capture_rate", 0))
+            best_struggling = max(results, key=lambda x: x[1].get("capture_rate", x[1].get("overall_rate", 0)))
             survivors.append(best_struggling[0])
             if verbose:
                 print(f"    Keeping best struggling agent: {best_struggling[0]}")
@@ -291,12 +291,27 @@ def run_kiln(
         print("\n=== Kiln Complete ===")
         if best_ever:
             print(f"Best agent: {best_ever[0]}")
-            print(f"Best capture rate: {best_ever[1]['capture_rate']:.2%}")
+            print(f"Best capture rate: {best_ever[1].get('capture_rate', best_ever[1].get('overall_rate', 0)):.2%}")
 
         # Final coherent count (excluding just "growing")
         truly_coherent = [c for c in coherent_found if c[1].get("status") == "coherent"]
         print(f"Total coherent found: {len(truly_coherent)}")
         print(f"Total growing: {len([c for c in coherent_found if c[1].get('status') == 'growing'])}")
+
+    # Final report
+    final_coherent = []
+    for agent_id in candidates:
+        result = client.query(
+            "MATCH (a:Agent {id: $id}) RETURN a.is_coherent, a.coherence_score",
+            {"id": agent_id}
+        )
+        if result and result[0][0]:
+            final_coherent.append((agent_id, result[0][1]))
+
+    if verbose:
+        print(f"Final coherent agents: {len(final_coherent)}")
+        for agent_id, score in sorted(final_coherent, key=lambda x: x[1] or 0, reverse=True):
+            print(f"  {agent_id}: {score or 0:.2%}")
 
     return {
         "final_population": candidates,
@@ -329,9 +344,8 @@ def run_single_generation(
     """
     # Expire old warnings
     try:
-        from ..mercy.chances import expire_old_warnings
         expire_old_warnings()
-    except ImportError:
+    except Exception:
         pass
 
     # Apply maintenance
@@ -345,8 +359,9 @@ def run_single_generation(
         results.append((agent_id, result))
         if verbose:
             status = result.get("status", "unknown")
-            print(f"  {agent_id}: {result['capture_rate']:.2%} capture, "
-                  f"{result['coverage']}/18 coverage, status={status}")
+            rate = result.get("capture_rate", result.get("overall_rate", 0))
+            print(f"  {agent_id}: {rate:.2%} capture, "
+                  f"{result.get('coverage', 0)}/18 coverage, status={status}")
 
     # Sort by coherence score (not just capture rate)
     results.sort(key=lambda x: x[1].get("score", 0), reverse=True)
