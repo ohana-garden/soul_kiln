@@ -4,7 +4,7 @@ Graph module - Single source of truth for the platform.
 All agent definitions, prompts, tools, and behavioral configurations
 are stored in and loaded from the FalkorDB graph.
 """
-from .client import GraphClient, get_client, reset_client
+from .client import GraphClient, get_client, reset_client, is_using_mock
 from .schema import init_schema, clear_graph, get_schema_version, SCHEMA_VERSION
 from .connection import GraphConnection, get_graph
 from .queries import (
@@ -21,6 +21,7 @@ __all__ = [
     "GraphClient",
     "get_client",
     "reset_client",
+    "is_using_mock",
     # Connection
     "GraphConnection",
     "get_graph",

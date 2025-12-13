@@ -10,7 +10,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Any, Optional
 
-from src.graph import get_client
+from src.graph import get_client, is_using_mock
+from src.graph.schema import init_schema
 from src.runtime import GraphAgentFactory, get_bridge
 
 app = FastAPI(
@@ -18,6 +19,20 @@ app = FastAPI(
     description="Test interface for the Graph-Based Proxy Agent Architecture",
     version="2.0.0"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize and seed on startup when using mock mode."""
+    client = get_client()
+    if client.is_mock:
+        print("[INFO] Mock mode detected, auto-seeding data...")
+        init_schema()
+        from src.seed.core import seed_core_data
+        from src.seed.ambassador import seed_ambassador
+        seed_core_data()
+        seed_ambassador()
+        print("[INFO] Mock data seeded successfully")
 
 
 # ============================================================================
