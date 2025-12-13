@@ -16,7 +16,7 @@ from src.constants import (
     MAX_EDGE_WEIGHT,
     MIN_EDGE_WEIGHT,
 )
-from src.models import Edge, Node, NodeType
+from src.models import Edge, EdgeType, Node, NodeType
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +249,7 @@ class GraphSubstrate:
         MATCH (a:Node {id: $source_id}), (b:Node {id: $target_id})
         CREATE (a)-[r:CONNECTS {
             weight: $weight,
+            edge_type: $edge_type,
             direction: $direction,
             created_at: $created_at,
             last_used: $last_used,
@@ -260,13 +261,14 @@ class GraphSubstrate:
             "source_id": edge.source_id,
             "target_id": edge.target_id,
             "weight": edge.weight,
+            "edge_type": edge.edge_type.value,
             "direction": edge.direction.value,
             "created_at": edge.created_at.isoformat(),
             "last_used": edge.last_used.isoformat(),
             "use_count": edge.use_count,
         }
         self._graph.query(query, params)
-        logger.debug(f"Created edge: {edge.source_id} -> {edge.target_id}")
+        logger.debug(f"Created edge: {edge.source_id} -> {edge.target_id} ({edge.edge_type.value})")
         return edge
 
     def get_edge(self, source_id: str, target_id: str) -> Edge | None:
@@ -418,12 +420,20 @@ class GraphSubstrate:
 
     def _props_to_edge(self, source_id: str, target_id: str, props: dict) -> Edge:
         """Convert FalkorDB properties to an Edge object."""
-        from src.models import EdgeDirection
+        from src.models import EdgeDirection, EdgeType
+
+        # Handle legacy edges without edge_type
+        edge_type_val = props.get("edge_type", "connects")
+        try:
+            edge_type = EdgeType(edge_type_val)
+        except ValueError:
+            edge_type = EdgeType.CONNECTS
 
         return Edge(
             source_id=source_id,
             target_id=target_id,
             weight=props["weight"],
+            edge_type=edge_type,
             direction=EdgeDirection(props["direction"]),
             created_at=datetime.fromisoformat(props["created_at"]),
             last_used=datetime.fromisoformat(props["last_used"]),
