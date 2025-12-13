@@ -2,7 +2,7 @@
 Agent Zero Bridge.
 
 Connects graph-hydrated agents to the Agent Zero runtime.
-This is the integration point where Soul Kiln meets Agent Zero.
+ALL EXECUTION HAPPENS THROUGH GRAPH-LOADED SSFs - no hardcoded behavior.
 """
 import sys
 import os
@@ -16,59 +16,45 @@ if str(AGENT_ZERO_PATH) not in sys.path:
 
 from .factory import GraphAgentFactory
 from .agent import GraphHydratedAgent
+from .ssf import get_ssf_registry, SSFRegistry
 from src.graphiti import EpisodeManager, MemoryManager
+from src.graph import get_client
 
 
 class AgentZeroBridge:
     """
     Bridge between Soul Kiln graph agents and Agent Zero runtime.
 
-    This class handles:
-    - Loading agents from the graph
-    - Configuring Agent Zero with graph-defined prompts and tools
-    - Routing behavioral checks (virtues, taboos) through the subsystems
-    - Persisting conversations and memories back to the graph
+    ALL behavior is loaded from the graph:
+    - Prompts come from graph
+    - Tools are SSFs in the graph
+    - Hooks are SSFs in the graph
+    - Validation rules are SSFs in the graph
     """
 
     def __init__(self):
         self.factory = GraphAgentFactory()
         self.episode_manager = EpisodeManager()
         self.memory_manager = MemoryManager()
+        self.ssf_registry = get_ssf_registry()
         self._active_agents: Dict[str, GraphHydratedAgent] = {}
+        self._client = get_client()
 
     def create_agent(
         self,
         agent_type_id: str,
         instance_id: str = None,
     ) -> GraphHydratedAgent:
-        """
-        Create and register a new agent from the graph.
-
-        Args:
-            agent_type_id: Type of agent to create
-            instance_id: Optional custom instance ID
-
-        Returns:
-            Hydrated agent ready for use
-        """
+        """Create and register a new agent from the graph."""
         agent = self.factory.create_agent(agent_type_id, instance_id)
         self._active_agents[agent.instance_id] = agent
         return agent
 
     def get_agent(self, instance_id: str) -> Optional[GraphHydratedAgent]:
-        """
-        Get an active agent by instance ID.
-
-        Args:
-            instance_id: Agent instance ID
-
-        Returns:
-            Agent if found, None otherwise
-        """
+        """Get an active agent by instance ID."""
         if instance_id in self._active_agents:
             return self._active_agents[instance_id]
 
-        # Try to hydrate from graph
         try:
             agent = self.factory.hydrate_agent(instance_id)
             self._active_agents[instance_id] = agent
@@ -86,20 +72,10 @@ class AgentZeroBridge:
         """
         Process a message through the agent.
 
-        This is the main entry point for agent interactions.
-        It handles:
-        - Pre-processing checks (taboos)
-        - Message routing to Agent Zero
-        - Post-processing (virtue alignment, memory storage)
-
-        Args:
-            agent_id: Agent instance ID
-            conversation_id: Conversation ID
-            message: User message
-            context: Additional context
-
-        Returns:
-            Response dict with 'response' and metadata
+        All processing uses SSFs from the graph:
+        1. Run pre-response hooks (validation, taboo checks)
+        2. Generate response using graph-defined prompts
+        3. Run post-response hooks (logging, memory)
         """
         agent = self.get_agent(agent_id)
         if not agent:
@@ -108,36 +84,73 @@ class AgentZeroBridge:
                 "response": None,
             }
 
-        # Pre-check: Taboo violations in the request
-        # (In case we need to refuse certain types of requests)
-
-        # Build context for Agent Zero
-        az_config = agent.to_agent_zero_config()
-
-        # Get conversation context
-        from src.graphiti import ContextRetriever
-        retriever = ContextRetriever()
-        conv_context = retriever.get_conversation_context(conversation_id)
-
-        # Merge contexts
-        full_context = {
+        # Build execution context
+        exec_context = {
+            "agent_id": agent_id,
+            "agent": {"name": agent.name, "type_id": agent.type_id},
+            "conversation_id": conversation_id,
+            "message": message,
             **(context or {}),
-            "conversation": conv_context,
-            "agent_config": az_config,
         }
 
-        # Here we would call Agent Zero
-        # For now, return a placeholder that shows the system is working
-        response = self._generate_response(agent, message, full_context)
+        # Step 1: Run pre-response hooks from graph
+        hook_results = self._run_hooks(agent.type_id, "pre_response", exec_context)
 
-        # Post-processing: Store memory of this interaction
+        # Check if any hook blocked the request
+        for result in hook_results:
+            if result.get("taboo_check", {}).get("violated"):
+                return {
+                    "error": "Request blocked by taboo check",
+                    "response": None,
+                    "taboo_violations": result["taboo_check"]["violations"],
+                }
+
+        # Step 2: Generate response using graph-loaded SSFs
+        response = self._generate_response(agent, message, exec_context)
+
+        # Step 3: Run post-response hooks
+        exec_context["response"] = response
+        self._run_hooks(agent.type_id, "post_response", exec_context)
+
+        # Step 4: Store interaction in graph
         self._store_interaction(agent_id, conversation_id, message, response)
 
         return {
             "response": response,
             "agent_id": agent_id,
             "conversation_id": conversation_id,
+            "hooks_executed": len(hook_results),
         }
+
+    def _run_hooks(
+        self,
+        agent_type_id: str,
+        hook_type: str,
+        context: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Run all hooks of a given type for an agent."""
+        # Get hook SSFs from graph
+        query = """
+        MATCH (t:AgentType {id: $type_id})-[:HAS_SSF]->(s:SSF)
+        WHERE s.ssf_type = 'hook' AND s.hook_type = $hook_type
+        RETURN s.id as ssf_id
+        """
+        result = self._client.query(query, {
+            "type_id": agent_type_id,
+            "hook_type": hook_type,
+        })
+
+        results = []
+        for row in result:
+            if row[0]:
+                ssf_id = row[0]
+                try:
+                    hook_result = self.ssf_registry.execute(ssf_id, context)
+                    results.append(hook_result)
+                except Exception as e:
+                    results.append({"error": str(e), "ssf_id": ssf_id})
+
+        return results
 
     def _generate_response(
         self,
@@ -146,26 +159,139 @@ class AgentZeroBridge:
         context: Dict[str, Any],
     ) -> str:
         """
-        Generate a response using the agent.
+        Generate a response using graph-loaded prompts and SSFs.
 
-        In production, this would call Agent Zero.
-        For now, returns a formatted placeholder.
+        This builds the full prompt from graph data and would call Agent Zero.
         """
-        # This is where Agent Zero integration happens
-        # The agent's system prompt and tools are passed to Agent Zero
-        # Agent Zero handles the actual LLM interaction
+        # Step 1: Build system prompt from graph using prompt generator SSF
+        system_prompt = self._build_system_prompt(agent)
 
-        # Placeholder response showing the system works
-        return f"""[{agent.name} responding]
+        # Step 2: Check if any tools should be activated
+        tool_results = self._check_tool_activation(agent.type_id, message, context)
 
-I received your message: "{message[:100]}..."
+        # Step 3: Build final response
+        # In production, this calls Agent Zero with:
+        # - system_prompt (from graph)
+        # - message (user input)
+        # - tool_results (from graph SSFs)
+        # - context (from graph)
 
-My configuration:
-- Type: {agent.type_id}
-- Virtues: {', '.join(v['name'] for v in agent.virtues[:3])}
-- Active tools: {', '.join(agent.get_tool_names()[:3])}
+        response_parts = [f"[{agent.name} responding via Graph-Loaded SSFs]"]
 
-[This is a placeholder - Agent Zero integration pending]"""
+        if tool_results:
+            response_parts.append("\n📊 Tool Results (from Graph SSFs):")
+            for tool_name, result in tool_results.items():
+                response_parts.append(f"\n  {tool_name}:")
+                if isinstance(result, dict) and "prompt" in result:
+                    # Tool returned a prompt for LLM processing
+                    response_parts.append(f"    {result['prompt'][:200]}...")
+                else:
+                    response_parts.append(f"    {str(result)[:200]}")
+
+        response_parts.append(f"\n\n💬 Message received: \"{message[:100]}...\"")
+        response_parts.append(f"\n\n🎭 Agent Configuration (all from graph):")
+        response_parts.append(f"  - Type: {agent.type_id}")
+        response_parts.append(f"  - Virtues: {len(agent.virtues)} loaded")
+        response_parts.append(f"  - Kuleanas: {len(agent.kuleanas)} loaded")
+        response_parts.append(f"  - SSFs available: {len(self._get_agent_ssfs(agent.type_id))}")
+
+        response_parts.append("\n\n[Agent Zero LLM call would happen here with graph-loaded config]")
+
+        return "\n".join(response_parts)
+
+    def _build_system_prompt(self, agent: GraphHydratedAgent) -> str:
+        """Build system prompt using graph-loaded prompt generator SSF."""
+        # Try to find a prompt generator SSF
+        query = """
+        MATCH (t:AgentType {id: $type_id})-[:HAS_SSF]->(s:SSF)
+        WHERE s.ssf_type = 'prompt_generator'
+        RETURN s.id as ssf_id, s.prompt_template as template
+        LIMIT 1
+        """
+        result = self._client.query(query, {"type_id": agent.type_id})
+
+        if result and result[0]:
+            template = result[0][1] if len(result[0]) > 1 else ""
+            if template:
+                # Build context for template
+                context = {
+                    "base_prompt": agent.prompts.get("agent.system", ""),
+                    "virtues_section": self._format_section(agent.virtues, "name", "description"),
+                    "kuleanas_section": self._format_section(agent.kuleanas, "name", "description"),
+                    "beliefs_section": self._format_section(agent.beliefs, "statement"),
+                    "taboos_section": self._format_section(agent.taboos, "name", "description"),
+                    "voice_section": self._format_voice(agent.voice),
+                }
+                return self.ssf_registry._render_template(template, context)
+
+        # Fallback to agent's built-in prompt builder
+        return agent.get_system_prompt()
+
+    def _format_section(self, items: List[Dict], *keys) -> str:
+        """Format a list of items for prompt inclusion."""
+        lines = []
+        for item in items:
+            parts = [str(item.get(k, "")) for k in keys if item.get(k)]
+            if parts:
+                lines.append(f"- {': '.join(parts)}")
+        return "\n".join(lines) if lines else "None defined"
+
+    def _format_voice(self, voice: Dict) -> str:
+        """Format voice patterns for prompt."""
+        lines = []
+        for key, value in voice.items():
+            if key != "emotions" and isinstance(value, dict):
+                tone = value.get("tone", "")
+                if tone:
+                    lines.append(f"- {key}: {tone}")
+        return "\n".join(lines) if lines else "Default professional tone"
+
+    def _check_tool_activation(
+        self,
+        agent_type_id: str,
+        message: str,
+        context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Check if any tool SSFs should be activated based on message."""
+        results = {}
+
+        # Get tool SSFs
+        query = """
+        MATCH (t:AgentType {id: $type_id})-[:HAS_SSF]->(s:SSF)
+        WHERE s.ssf_type = 'tool'
+        RETURN s.id as ssf_id, s.name as name, s.description as desc
+        """
+        tools = self._client.query(query, {"type_id": agent_type_id})
+
+        message_lower = message.lower()
+
+        for row in tools:
+            if row[0]:
+                ssf_id = row[0]
+                name = row[1] if len(row) > 1 else ssf_id
+                desc = row[2] if len(row) > 2 else ""
+
+                # Simple activation check - in production this would be smarter
+                keywords = desc.lower().split() if desc else []
+                should_activate = any(kw in message_lower for kw in keywords if len(kw) > 3)
+
+                if should_activate:
+                    try:
+                        result = self.ssf_registry.execute(ssf_id, context)
+                        results[name] = result
+                    except Exception as e:
+                        results[name] = {"error": str(e)}
+
+        return results
+
+    def _get_agent_ssfs(self, agent_type_id: str) -> List[str]:
+        """Get all SSF IDs for an agent type."""
+        query = """
+        MATCH (t:AgentType {id: $type_id})-[:HAS_SSF]->(s:SSF)
+        RETURN s.id
+        """
+        result = self._client.query(query, {"type_id": agent_type_id})
+        return [row[0] for row in result if row[0]]
 
     def _store_interaction(
         self,
@@ -175,7 +301,6 @@ My configuration:
         agent_response: str,
     ):
         """Store the interaction in the graph."""
-        # Store as episode
         self.episode_manager.create_episode(
             agent_id=agent_id,
             conversation_id=conversation_id,
@@ -183,8 +308,7 @@ My configuration:
             episode_type="conversation",
         )
 
-        # Store as memory if significant
-        if len(user_message) > 50:  # Simple heuristic
+        if len(user_message) > 50:
             self.memory_manager.store_memory(
                 agent_id=agent_id,
                 content=f"Discussed: {user_message[:100]}",
@@ -192,29 +316,48 @@ My configuration:
                 importance=0.5,
             )
 
+    def execute_tool(
+        self,
+        agent_id: str,
+        tool_ssf_id: str,
+        tool_args: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Execute a specific tool SSF.
+
+        Args:
+            agent_id: Agent instance ID
+            tool_ssf_id: SSF ID of the tool to execute
+            tool_args: Arguments for the tool
+
+        Returns:
+            Tool execution result
+        """
+        agent = self.get_agent(agent_id)
+        if not agent:
+            return {"error": f"Agent not found: {agent_id}"}
+
+        context = {
+            "agent_id": agent_id,
+            "agent": {"name": agent.name, "type_id": agent.type_id},
+            **tool_args,
+        }
+
+        try:
+            return self.ssf_registry.execute(tool_ssf_id, context)
+        except Exception as e:
+            return {"error": str(e)}
+
     def check_action(
         self,
         agent_id: str,
         action: str,
     ) -> Dict[str, Any]:
-        """
-        Check if an action is allowed by the agent's behavioral constraints.
-
-        Args:
-            agent_id: Agent instance ID
-            action: Action description to check
-
-        Returns:
-            Dict with 'allowed' bool and details
-        """
+        """Check if an action is allowed by behavioral constraints."""
         agent = self.get_agent(agent_id)
         if not agent:
-            return {
-                "allowed": False,
-                "error": f"Agent not found: {agent_id}",
-            }
+            return {"allowed": False, "error": f"Agent not found: {agent_id}"}
 
-        # Check taboos first (hard constraints)
         taboo_check = agent.check_taboo(action)
         if taboo_check["violated"]:
             return {
@@ -223,46 +366,34 @@ My configuration:
                 "details": taboo_check,
             }
 
-        # Check virtue alignment (soft guidance)
         virtue_check = agent.check_virtue(action)
-
         return {
             "allowed": True,
             "virtue_alignment": virtue_check,
         }
 
     def get_agent_prompt(self, agent_id: str) -> str:
-        """
-        Get the complete system prompt for an agent.
-
-        Args:
-            agent_id: Agent instance ID
-
-        Returns:
-            Complete system prompt string
-        """
+        """Get the complete system prompt (built from graph)."""
         agent = self.get_agent(agent_id)
         if not agent:
             return ""
-
-        return agent.get_system_prompt()
+        return self._build_system_prompt(agent)
 
     def list_available_types(self) -> List[Dict[str, Any]]:
-        """
-        List all available agent types.
-
-        Returns:
-            List of agent type definitions
-        """
+        """List all available agent types."""
         return self.factory.list_agent_types()
 
-    def shutdown_agent(self, agent_id: str):
+    def list_agent_ssfs(self, agent_type_id: str) -> List[Dict[str, Any]]:
+        """List all SSFs for an agent type."""
+        query = """
+        MATCH (t:AgentType {id: $type_id})-[:HAS_SSF]->(s:SSF)
+        RETURN s
         """
-        Shut down an active agent.
+        result = self._client.query(query, {"type_id": agent_type_id})
+        return [dict(row[0].properties) for row in result if row[0]]
 
-        Args:
-            agent_id: Agent instance ID
-        """
+    def shutdown_agent(self, agent_id: str):
+        """Shut down an active agent."""
         if agent_id in self._active_agents:
             del self._active_agents[agent_id]
 
