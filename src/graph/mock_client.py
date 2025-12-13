@@ -94,8 +94,13 @@ class MockGraphClient:
             label = node_pattern.group(2)
             props_str = node_pattern.group(3)
 
-            # Parse properties
+            # Parse properties from the MERGE pattern
             props = self._parse_properties(props_str)
+
+            # Also parse ON CREATE SET / ON MATCH SET properties
+            # This handles patterns like: s.name = $name, s.type = $type
+            set_props = self._parse_set_clauses(cypher, var_name, params)
+            props.update(set_props)
 
             node_id = props.get('id', f"{label}_{len(self.nodes)}")
 
@@ -123,9 +128,51 @@ class MockGraphClient:
 
         return []
 
+    def _parse_set_clauses(self, cypher: str, var_name: str, params: dict) -> Dict[str, Any]:
+        """Parse ON CREATE SET / ON MATCH SET clauses."""
+        props = {}
+
+        # Find all SET clauses (both ON CREATE SET and ON MATCH SET)
+        # Pattern: var.prop = $param or var.prop = value
+        pattern = rf'{var_name}\.(\w+)\s*=\s*(\$\w+|\'[^\']*\'|"[^"]*"|\d+\.?\d*|true|false|null|datetime\([^)]+\))'
+
+        for match in re.finditer(pattern, cypher, re.IGNORECASE):
+            prop_name = match.group(1)
+            raw_value = match.group(2)
+
+            # Resolve value
+            if raw_value.startswith('$'):
+                param_name = raw_value[1:]
+                value = params.get(param_name)
+            elif raw_value.startswith(("'", '"')):
+                value = raw_value[1:-1]
+            elif raw_value.lower() == 'true':
+                value = True
+            elif raw_value.lower() == 'false':
+                value = False
+            elif raw_value.lower() == 'null':
+                value = None
+            elif raw_value.startswith('datetime('):
+                value = raw_value  # Keep as string for mock
+            else:
+                try:
+                    value = float(raw_value) if '.' in raw_value else int(raw_value)
+                except ValueError:
+                    value = raw_value
+
+            if value is not None:
+                props[prop_name] = value
+
+        return props
+
     def _handle_match(self, cypher: str, params: dict) -> list:
         """Handle MATCH queries."""
         results = []
+
+        # Check for multi-node queries with OPTIONAL MATCH
+        # e.g., MATCH (a:AgentInstance {id: $agent_id}) OPTIONAL MATCH (a)-[:IS_TYPE]->(t:AgentType) RETURN a, t
+        if "OPTIONAL MATCH" in cypher.upper():
+            return self._handle_optional_match(cypher, params)
 
         # Simple pattern matching for (n:Label {id: 'value'})
         match_pattern = re.search(r'MATCH\s+\((\w+):(\w+)\s*(?:\{id:\s*[\'"]([^\'"]+)[\'"]\})?\)', cypher, re.IGNORECASE)
@@ -147,7 +194,111 @@ class MockGraphClient:
         if "count(" in cypher.lower():
             return [[len(results)]]
 
+        # Handle RETURN with specific properties (e.g., RETURN s.id as ssf_id)
+        return self._transform_return(cypher, results)
+
+    def _handle_optional_match(self, cypher: str, params: dict) -> list:
+        """Handle queries with OPTIONAL MATCH."""
+        results = []
+
+        # Parse the primary MATCH
+        primary_match = re.search(r'MATCH\s+\((\w+):(\w+)\s*\{id:\s*[\'"]([^\'"]+)[\'"]\}\)', cypher, re.IGNORECASE)
+        if not primary_match:
+            # Try to match without id filter
+            primary_match = re.search(r'MATCH\s+\((\w+):(\w+)\)', cypher, re.IGNORECASE)
+
+        if not primary_match:
+            return results
+
+        primary_var = primary_match.group(1)
+        primary_label = primary_match.group(2)
+        primary_id = primary_match.group(3) if len(primary_match.groups()) > 2 else None
+
+        # Find primary nodes
+        primary_nodes = []
+        if primary_id and primary_id in self.nodes:
+            node = self.nodes[primary_id]
+            if primary_label in node.labels:
+                primary_nodes.append(node)
+        elif not primary_id:
+            for node in self.nodes.values():
+                if primary_label in node.labels:
+                    primary_nodes.append(node)
+
+        # For each primary node, look for optional relationships
+        # Parse the OPTIONAL MATCH to find linked node type
+        optional_pattern = re.search(
+            rf'OPTIONAL MATCH\s+\({primary_var}\)-\[\w*:?(\w+)?\]->\((\w+):(\w+)\)',
+            cypher, re.IGNORECASE
+        )
+
+        for primary_node in primary_nodes:
+            row = [primary_node]
+
+            if optional_pattern:
+                rel_type = optional_pattern.group(1)
+                linked_var = optional_pattern.group(2)
+                linked_label = optional_pattern.group(3)
+
+                # Find edges from this node
+                linked_node = None
+                for edge in self.edges.values():
+                    if edge.from_node == primary_var and (not rel_type or edge.type == rel_type):
+                        # Find the target node - need to look up by edge's to_node value
+                        # In our simple model, we stored var names not IDs
+                        # Let's find a node of the target label
+                        for n in self.nodes.values():
+                            if linked_label in n.labels:
+                                linked_node = n
+                                break
+                        break
+
+                row.append(linked_node)  # Can be None for OPTIONAL MATCH
+
+            results.append(row)
+
         return results
+
+    def _transform_return(self, cypher: str, results: list) -> list:
+        """Transform results based on RETURN clause."""
+        # Parse RETURN clause for property projections
+        # e.g., RETURN s.id as ssf_id, s.name as name
+        return_match = re.search(r'RETURN\s+(.+?)(?:\s+ORDER|\s+LIMIT|\s*$)', cypher, re.IGNORECASE | re.DOTALL)
+        if not return_match:
+            return results
+
+        return_clause = return_match.group(1).strip()
+
+        # Check if it's returning properties (e.g., s.id) vs nodes (e.g., s)
+        projections = []
+        for part in return_clause.split(','):
+            part = part.strip()
+            # Match patterns like "s.id as ssf_id" or "s.id"
+            prop_match = re.match(r'(\w+)\.(\w+)(?:\s+as\s+(\w+))?', part, re.IGNORECASE)
+            if prop_match:
+                var_name = prop_match.group(1)
+                prop_name = prop_match.group(2)
+                alias = prop_match.group(3) or prop_name
+                projections.append((var_name, prop_name, alias))
+
+        if not projections:
+            return results
+
+        # Transform results to return property values
+        transformed = []
+        for row in results:
+            new_row = []
+            for var_name, prop_name, alias in projections:
+                # Find the node for this variable (assume first node in row)
+                value = None
+                for item in row:
+                    if isinstance(item, MockNode):
+                        value = item.properties.get(prop_name)
+                        break
+                new_row.append(value)
+            transformed.append(new_row)
+
+        return transformed
 
     def _handle_delete_all(self) -> list:
         """Handle DETACH DELETE all."""
