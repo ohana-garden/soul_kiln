@@ -6,6 +6,7 @@ ALL EXECUTION HAPPENS THROUGH GRAPH-LOADED SSFs - no hardcoded behavior.
 """
 import sys
 import os
+import logging
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from .agent import GraphHydratedAgent
 from .ssf import get_ssf_registry, SSFRegistry
 from src.graphiti import EpisodeManager, MemoryManager
 from src.graph import get_client
+from src.llm import get_llm_client
+
+logger = logging.getLogger(__name__)
 
 
 class AgentZeroBridge:
@@ -37,6 +41,7 @@ class AgentZeroBridge:
         self.episode_manager = EpisodeManager()
         self.memory_manager = MemoryManager()
         self.ssf_registry = get_ssf_registry()
+        self.llm_client = get_llm_client()
         self._active_agents: Dict[str, GraphHydratedAgent] = {}
         self._client = get_client()
 
@@ -159,9 +164,9 @@ class AgentZeroBridge:
         context: Dict[str, Any],
     ) -> str:
         """
-        Generate a response using graph-loaded prompts and SSFs.
+        Generate a response using graph-loaded prompts and LLM.
 
-        This builds the full prompt from graph data and would call Agent Zero.
+        This builds the full prompt from graph data and calls Claude.
         """
         # Step 1: Build system prompt from graph using prompt generator SSF
         system_prompt = self._build_system_prompt(agent)
@@ -169,35 +174,71 @@ class AgentZeroBridge:
         # Step 2: Check if any tools should be activated
         tool_results = self._check_tool_activation(agent.type_id, message, context)
 
-        # Step 3: Build final response
-        # In production, this calls Agent Zero with:
-        # - system_prompt (from graph)
-        # - message (user input)
-        # - tool_results (from graph SSFs)
-        # - context (from graph)
+        # Step 3: Build enhanced user message with tool context
+        user_message = message
+        if tool_results:
+            tool_context = "\n\n[Tool Results from Graph SSFs]\n"
+            for tool_name, result in tool_results.items():
+                if isinstance(result, dict) and "prompt" in result:
+                    tool_context += f"\n{tool_name}:\n{result['prompt']}\n"
+                elif isinstance(result, dict) and "error" not in result:
+                    tool_context += f"\n{tool_name}: {result}\n"
+            user_message = f"{message}\n{tool_context}"
 
-        response_parts = [f"[{agent.name} responding via Graph-Loaded SSFs]"]
+        # Step 4: Call LLM if configured
+        if self.llm_client.is_configured:
+            try:
+                logger.info(f"Generating LLM response for agent {agent.name}")
+                llm_response = self.llm_client.generate(
+                    system_prompt=system_prompt,
+                    user_message=user_message,
+                    temperature=0.7,
+                )
+                logger.info(
+                    f"LLM response generated: {llm_response.input_tokens} in, "
+                    f"{llm_response.output_tokens} out"
+                )
+                return llm_response.content
+            except Exception as e:
+                logger.error(f"LLM generation failed: {e}")
+                return self._fallback_response(agent, message, tool_results, str(e))
+        else:
+            # LLM not configured - return informative fallback
+            logger.warning("LLM not configured, using fallback response")
+            return self._fallback_response(agent, message, tool_results)
+
+    def _fallback_response(
+        self,
+        agent: GraphHydratedAgent,
+        message: str,
+        tool_results: Dict[str, Any],
+        error: str = None,
+    ) -> str:
+        """Generate a fallback response when LLM is unavailable."""
+        parts = [f"[{agent.name} - LLM Not Configured]"]
+
+        if error:
+            parts.append(f"\n⚠️ Error: {error}")
+
+        parts.append(f"\n\n💬 Your message: \"{message[:200]}\"")
 
         if tool_results:
-            response_parts.append("\n📊 Tool Results (from Graph SSFs):")
+            parts.append("\n\n📊 Tool Results (from Graph SSFs):")
             for tool_name, result in tool_results.items():
-                response_parts.append(f"\n  {tool_name}:")
                 if isinstance(result, dict) and "prompt" in result:
-                    # Tool returned a prompt for LLM processing
-                    response_parts.append(f"    {result['prompt'][:200]}...")
-                else:
-                    response_parts.append(f"    {str(result)[:200]}")
+                    parts.append(f"\n  {tool_name}:\n    {result['prompt'][:300]}")
+                elif isinstance(result, dict) and "error" not in result:
+                    parts.append(f"\n  {tool_name}: {result}")
 
-        response_parts.append(f"\n\n💬 Message received: \"{message[:100]}...\"")
-        response_parts.append(f"\n\n🎭 Agent Configuration (all from graph):")
-        response_parts.append(f"  - Type: {agent.type_id}")
-        response_parts.append(f"  - Virtues: {len(agent.virtues)} loaded")
-        response_parts.append(f"  - Kuleanas: {len(agent.kuleanas)} loaded")
-        response_parts.append(f"  - SSFs available: {len(self._get_agent_ssfs(agent.type_id))}")
+        parts.append(f"\n\n🎭 Agent loaded from graph:")
+        parts.append(f"  - Type: {agent.type_id}")
+        parts.append(f"  - Virtues: {len(agent.virtues)}")
+        parts.append(f"  - Kuleanas: {len(agent.kuleanas)}")
+        parts.append(f"  - SSFs: {len(self._get_agent_ssfs(agent.type_id))}")
 
-        response_parts.append("\n\n[Agent Zero LLM call would happen here with graph-loaded config]")
+        parts.append("\n\n💡 To enable LLM responses, set ANTHROPIC_API_KEY in your .env file")
 
-        return "\n".join(response_parts)
+        return "\n".join(parts)
 
     def _build_system_prompt(self, agent: GraphHydratedAgent) -> str:
         """Build system prompt using graph-loaded prompt generator SSF."""

@@ -1,38 +1,215 @@
 """
-Test UI for Graph-Based Proxy Agent Architecture.
+Soul Kiln API Server.
 
-A web interface for exploring and testing the Ambassador agent
-with all definitions loaded from the FalkorDB graph.
+Production-ready API for the Graph-Based Proxy Agent Architecture.
+All agent definitions loaded from FalkorDB graph.
 """
-
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+import logging
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any, Optional
 
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
+
+from src.settings import settings
 from src.graph import get_client, is_using_mock
 from src.graph.schema import init_schema
 from src.runtime import GraphAgentFactory, get_bridge
 
-app = FastAPI(
-    title="Soul Kiln Test UI",
-    description="Test interface for the Graph-Based Proxy Agent Architecture",
-    version="2.0.0"
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+logger = logging.getLogger(__name__)
+
+# Track startup time for health checks
+_startup_time: Optional[datetime] = None
+_is_ready: bool = False
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize and seed on startup when using mock mode."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler."""
+    global _startup_time, _is_ready
+
+    # Startup
+    _startup_time = datetime.utcnow()
+    logger.info(f"Starting Soul Kiln API (env={settings.environment})")
+
     client = get_client()
     if client.is_mock:
-        print("[INFO] Mock mode detected, auto-seeding data...")
+        logger.info("Mock mode detected, auto-seeding data...")
         init_schema()
         from src.seed.core import seed_core_data
         from src.seed.ambassador import seed_ambassador
         seed_core_data()
         seed_ambassador()
-        print("[INFO] Mock data seeded successfully")
+        logger.info("Mock data seeded successfully")
+
+    _is_ready = True
+    logger.info(f"Soul Kiln API ready on {settings.api.host}:{settings.api.port}")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Soul Kiln API")
+    _is_ready = False
+
+
+app = FastAPI(
+    title="Soul Kiln API",
+    description="Graph-Based Proxy Agent Architecture for Student Financial Advocacy",
+    version="2.0.0",
+    lifespan=lifespan,
+    docs_url="/docs" if settings.is_development else None,
+    redoc_url="/redoc" if settings.is_development else None,
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if settings.is_development else [],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# =============================================================================
+# Request logging middleware
+# =============================================================================
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all requests with timing."""
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+
+    logger.info(
+        f"{request.method} {request.url.path} - {response.status_code} - {duration:.3f}s"
+    )
+    return response
+
+
+# =============================================================================
+# Global exception handler
+# =============================================================================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions."""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "internal_server_error",
+            "message": str(exc) if settings.is_development else "An internal error occurred",
+        }
+    )
+
+
+# =============================================================================
+# Health & Readiness Endpoints
+# =============================================================================
+
+@app.get("/health", tags=["Health"])
+def health_check():
+    """
+    Health check endpoint for load balancers and container orchestration.
+    Returns 200 if the service is running.
+    """
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "environment": settings.environment,
+        "uptime_seconds": (datetime.utcnow() - _startup_time).total_seconds() if _startup_time else 0,
+    }
+
+
+@app.get("/ready", tags=["Health"])
+def readiness_check():
+    """
+    Readiness check endpoint. Returns 200 if the service is ready to accept traffic.
+    Checks database connectivity.
+    """
+    if not _is_ready:
+        raise HTTPException(status_code=503, detail="Service not ready")
+
+    client = get_client()
+    db_status = "mock" if client.is_mock else "connected"
+
+    # Test database connection
+    try:
+        if not client.is_mock:
+            client.query("RETURN 1")
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+    return {
+        "ready": True,
+        "database": db_status,
+        "llm_configured": settings.llm.is_configured,
+    }
+
+
+@app.get("/api/config", tags=["Health"])
+def get_config():
+    """Get current configuration (non-sensitive values only)."""
+    return {
+        "environment": settings.environment,
+        "database": {
+            "host": settings.database.host,
+            "port": settings.database.port,
+            "graph": settings.database.graph,
+        },
+        "llm": {
+            "model": settings.llm.model,
+            "max_tokens": settings.llm.max_tokens,
+            "configured": settings.llm.is_configured,
+        },
+    }
+
+
+# =============================================================================
+# API Key Authentication
+# =============================================================================
+
+from fastapi.security import APIKeyHeader
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Depends(api_key_header)) -> bool:
+    """
+    Verify API key for protected endpoints.
+    In development mode, authentication is optional.
+    In production, a valid API key is required.
+    """
+    if settings.is_development:
+        # Development mode - auth is optional
+        return True
+
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="API key required. Set X-API-Key header.",
+        )
+
+    # Compare with configured secret key
+    if api_key != settings.api.secret_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid API key",
+        )
+
+    return True
 
 
 # ============================================================================

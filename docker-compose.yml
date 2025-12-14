@@ -1,13 +1,71 @@
 version: '3.8'
+
 services:
+  # ==========================================================================
+  # FalkorDB - Graph Database
+  # ==========================================================================
   falkordb:
     image: falkordb/falkordb:latest
+    container_name: soul_kiln_db
     ports:
-      - "6379:6379"
+      - "${FALKORDB_PORT:-6379}:6379"
     volumes:
       - falkordb_data:/data
     command: >
       --loadmodule /usr/lib/redis/modules/falkordb.so
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  # ==========================================================================
+  # Soul Kiln API Server
+  # ==========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: soul_kiln_api
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - FALKORDB_GRAPH=${FALKORDB_GRAPH:-soul_kiln}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-20250514}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-4096}
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
 volumes:
   falkordb_data:
+    driver: local
