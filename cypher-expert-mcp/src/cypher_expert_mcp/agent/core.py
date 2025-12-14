@@ -27,6 +27,7 @@ class GenerationResult:
     parameters: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     alternatives: list[str] = field(default_factory=list)
+    ethical_review: dict[str, Any] | None = None
 
 
 @dataclass

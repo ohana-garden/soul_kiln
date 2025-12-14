@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from ..agent.core import CypherAgent
 from ..agent.memory import QueryMemory
+from .ethics import review_query_ethics, get_ethical_explanation
 
 
 @dataclass
@@ -29,6 +30,7 @@ class CypherResult:
     warnings: list[str] = field(default_factory=list)
     alternatives: list[str] = field(default_factory=list)
     optimization_notes: list[str] = field(default_factory=list)
+    ethical_review: dict[str, Any] | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -40,6 +42,7 @@ class CypherResult:
                 "warnings": self.warnings,
                 "alternatives": self.alternatives,
                 "optimization_notes": self.optimization_notes,
+                "ethical_review": self.ethical_review,
             },
             indent=2,
         )
@@ -127,6 +130,17 @@ async def generate_cypher_impl(
     """Generate Cypher from natural language request."""
     agent = get_agent()
 
+    # Pre-check request for ethical concerns before generating
+    request_review = review_query_ethics("", request=request)
+    if request_review.has_blocking_concerns:
+        return CypherResult(
+            query="",
+            explanation="Request blocked due to ethical concerns.",
+            confidence=0.0,
+            warnings=[get_ethical_explanation(request_review)],
+            ethical_review=request_review.to_dict(),
+        )
+
     # Fetch schema if requested
     schema = None
     if schema_context:
@@ -146,6 +160,27 @@ async def generate_cypher_impl(
 
     # Generate initial query
     result = await agent.generate_query(request, schema)
+
+    # Ethical review of generated query
+    if result.query:
+        ethical_review = review_query_ethics(result.query, request=request, schema=schema)
+
+        # Block queries with severe ethical concerns
+        if ethical_review.has_blocking_concerns:
+            return CypherResult(
+                query="",
+                explanation="Generated query blocked due to ethical concerns.",
+                confidence=0.0,
+                warnings=[get_ethical_explanation(ethical_review)],
+                ethical_review=ethical_review.to_dict(),
+            )
+
+        # Add ethical warnings to result
+        for concern in ethical_review.concerns:
+            if concern.severity in ("warning", "info"):
+                result.warnings.append(f"[{concern.category.upper()}] {concern.description}")
+
+        result.ethical_review = ethical_review.to_dict()
 
     # Optimization pass if requested
     if optimize and result.query:
@@ -188,6 +223,21 @@ async def execute_cypher_impl(
 ) -> ExecutionResult:
     """Execute a Cypher query with safety rails."""
     warnings = []
+
+    # Ethical review before execution
+    ethical_review = review_query_ethics(query)
+    if ethical_review.has_blocking_concerns:
+        return ExecutionResult(
+            success=False,
+            error="Query blocked due to ethical concerns: " +
+                  "; ".join(c.description for c in ethical_review.concerns if c.severity == "block"),
+            warnings=[get_ethical_explanation(ethical_review)],
+        )
+
+    # Add ethical warnings
+    for concern in ethical_review.concerns:
+        if concern.severity == "warning":
+            warnings.append(f"[ETHICAL] {concern.description}")
 
     # Safety checks
     safety_result = _check_query_safety(query, params)

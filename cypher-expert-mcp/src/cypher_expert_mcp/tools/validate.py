@@ -175,6 +175,8 @@ async def analyze_query_impl(
 
 async def lint_cypher_impl(query: str) -> LintResult:
     """Validate Cypher syntax and check for anti-patterns."""
+    from .ethics import review_query_ethics
+
     result = LintResult(valid=True)
     issues = []
 
@@ -193,6 +195,17 @@ async def lint_cypher_impl(query: str) -> LintResult:
     # Security checks
     security_issues = _check_security(query)
     issues.extend(security_issues)
+
+    # Ethical checks
+    ethical_review = review_query_ethics(query)
+    for concern in ethical_review.concerns:
+        severity_map = {"block": "error", "warning": "warning", "info": "info"}
+        issues.append(LintIssue(
+            severity=severity_map.get(concern.severity, "warning"),
+            message=f"[ETHICS/{concern.category.upper()}] {concern.description}",
+            rule=f"ethics/{concern.category}",
+            suggestion=concern.suggestion,
+        ))
 
     result.issues = issues
 
