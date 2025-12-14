@@ -162,3 +162,240 @@ class CharacterProfile(BaseModel):
     virtue_affinities: dict[str, float] = Field(default_factory=dict)
     basin_depths: dict[str, float] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ============================================================================
+# GESTALT MODELS - Holistic character representation
+# ============================================================================
+
+
+class VirtueRelation(BaseModel):
+    """
+    A relation between two virtues in the gestalt.
+
+    Captures reinforcement, tension, or conditional dependency.
+    """
+    source_virtue: str
+    target_virtue: str
+    relation_type: Literal["reinforces", "tensions", "conditions"] = "reinforces"
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+    context: str | None = None  # When this relation applies
+
+
+class Gestalt(BaseModel):
+    """
+    A holistic character representation.
+
+    The gestalt captures not just which virtues an agent has,
+    but how they relate, balance, and express as unified character.
+    This is the "who" that determines "what would this agent do?"
+    """
+    id: str
+    agent_id: str
+
+    # Virtue activation pattern
+    virtue_activations: dict[str, float] = Field(default_factory=dict)
+
+    # Relational structure between virtues
+    virtue_relations: list[VirtueRelation] = Field(default_factory=list)
+
+    # Dominant character traits (top virtues by influence)
+    dominant_traits: list[str] = Field(default_factory=list)
+
+    # Character archetype (emergent from virtue pattern)
+    archetype: str | None = None  # e.g., "guardian", "seeker", "servant"
+
+    # Behavioral tendencies derived from topology
+    tendencies: dict[str, float] = Field(default_factory=dict)
+    # e.g., {"prioritizes_need": 0.8, "values_fairness": 0.9}
+
+    # Coherence metrics
+    internal_coherence: float = Field(default=0.0, ge=0.0, le=1.0)
+    stability: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    def get_tendency(self, name: str) -> float:
+        """Get a behavioral tendency score."""
+        return self.tendencies.get(name, 0.5)
+
+
+# ============================================================================
+# SITUATION MODELS - Resource allocation scenarios
+# ============================================================================
+
+
+class Stakeholder(BaseModel):
+    """
+    An entity with claims on resources.
+
+    Stakeholders have needs, desert (what they've earned/deserve),
+    and relationships to other stakeholders.
+    """
+    id: str
+    name: str
+
+    # Claim factors
+    need: float = Field(default=0.5, ge=0.0, le=1.0)  # How much they need it
+    desert: float = Field(default=0.5, ge=0.0, le=1.0)  # How much they deserve it
+    urgency: float = Field(default=0.5, ge=0.0, le=1.0)  # Time sensitivity
+
+    # Context
+    vulnerability: float = Field(default=0.0, ge=0.0, le=1.0)  # Special consideration
+    history: dict = Field(default_factory=dict)  # Past interactions
+
+    metadata: dict = Field(default_factory=dict)
+
+
+class Resource(BaseModel):
+    """
+    A scarce resource to be allocated.
+    """
+    id: str
+    name: str
+    quantity: float = Field(default=1.0, ge=0.0)  # How much is available
+    divisible: bool = True  # Can it be split?
+
+    # Properties that might matter for allocation
+    properties: dict = Field(default_factory=dict)
+
+
+class Claim(BaseModel):
+    """
+    A stakeholder's claim on a resource.
+    """
+    stakeholder_id: str
+    resource_id: str
+
+    # Strength of claim
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    # Basis for claim
+    basis: Literal["need", "desert", "right", "promise", "relationship"] = "need"
+
+    # Justification
+    justification: str | None = None
+
+
+class StakeholderRelation(BaseModel):
+    """
+    Relationship between stakeholders.
+    """
+    source_id: str
+    target_id: str
+    relation_type: Literal["depends_on", "supports", "competes_with", "family", "community"]
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class Situation(BaseModel):
+    """
+    A resource allocation situation.
+
+    Contains stakeholders, resources, claims, and relationships
+    that define the moral context for action selection.
+    """
+    id: str
+    name: str
+    description: str | None = None
+
+    stakeholders: list[Stakeholder] = Field(default_factory=list)
+    resources: list[Resource] = Field(default_factory=list)
+    claims: list[Claim] = Field(default_factory=list)
+    relations: list[StakeholderRelation] = Field(default_factory=list)
+
+    # Constraints on valid actions
+    constraints: dict = Field(default_factory=dict)
+    # e.g., {"must_allocate_all": True, "max_per_stakeholder": 0.5}
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    def get_stakeholder(self, stakeholder_id: str) -> Stakeholder | None:
+        """Get stakeholder by ID."""
+        for s in self.stakeholders:
+            if s.id == stakeholder_id:
+                return s
+        return None
+
+    def get_claims_for_resource(self, resource_id: str) -> list[Claim]:
+        """Get all claims on a resource."""
+        return [c for c in self.claims if c.resource_id == resource_id]
+
+
+# ============================================================================
+# ACTION MODELS - Decisions and their justifications
+# ============================================================================
+
+
+class Allocation(BaseModel):
+    """
+    An allocation of resource to stakeholder.
+    """
+    stakeholder_id: str
+    resource_id: str
+    amount: float = Field(ge=0.0)
+
+    # Why this allocation
+    justification: str | None = None
+    justification_virtue: str | None = None  # Which virtue supports this
+
+
+class Action(BaseModel):
+    """
+    A proposed action for a situation.
+
+    Contains allocations plus justifications grounded in virtues.
+    """
+    id: str
+    situation_id: str
+
+    # The allocations
+    allocations: list[Allocation] = Field(default_factory=list)
+
+    # Overall justification
+    primary_justification: str | None = None
+    supporting_virtues: list[str] = Field(default_factory=list)
+
+    # Confidence/probability
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    # Trade-offs acknowledged
+    trade_offs: list[str] = Field(default_factory=list)
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ActionDistribution(BaseModel):
+    """
+    A distribution over possible actions.
+
+    Represents calibrated uncertainty: multiple defensible actions
+    with associated probabilities.
+    """
+    situation_id: str
+    gestalt_id: str
+
+    actions: list[Action] = Field(default_factory=list)
+    probabilities: list[float] = Field(default_factory=list)
+
+    # Which virtues were most influential
+    influential_virtues: list[str] = Field(default_factory=list)
+
+    # Consensus vs divergence
+    consensus_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    # High = one clear best action; Low = genuinely ambiguous
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    def get_top_action(self) -> Action | None:
+        """Get the highest probability action."""
+        if not self.actions:
+            return None
+        max_idx = self.probabilities.index(max(self.probabilities))
+        return self.actions[max_idx]
+
+    def sample_action(self) -> Action | None:
+        """Sample an action according to the distribution."""
+        import random
+        if not self.actions:
+            return None
+        return random.choices(self.actions, weights=self.probabilities, k=1)[0]

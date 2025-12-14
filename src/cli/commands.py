@@ -460,3 +460,292 @@ def tiers(agent_type, generation):
     click.echo("\n=== PHILOSOPHY ===")
     click.echo("Trust is the foundation. Context shapes expectations.")
     click.echo("Growth is the journey. We learn together.")
+
+
+# ============================================================================
+# GESTALT COMMANDS - Holistic character analysis
+# ============================================================================
+
+
+@cli.command()
+@click.argument("agent_id")
+def gestalt(agent_id):
+    """Compute and display an agent's gestalt (holistic character)."""
+    from ..gestalt import compute_gestalt
+    from ..gestalt.compute import describe_gestalt
+    from ..virtues.anchors import VIRTUES
+
+    click.echo(f"Computing gestalt for {agent_id}...")
+
+    g = compute_gestalt(agent_id)
+
+    click.echo(f"\n=== GESTALT: {agent_id} ===\n")
+
+    if g.archetype:
+        click.echo(f"Archetype: {g.archetype.upper()}")
+
+    click.echo(f"\nDominant Virtues:")
+    for v_id in g.dominant_traits[:5]:
+        act = g.virtue_activations.get(v_id, 0)
+        name = next((v["name"] for v in VIRTUES if v["id"] == v_id), v_id)
+        click.echo(f"  {v_id} {name}: {act:.2f}")
+
+    click.echo(f"\nBehavioral Tendencies:")
+    sorted_tendencies = sorted(g.tendencies.items(), key=lambda x: x[1], reverse=True)
+    for t_name, t_val in sorted_tendencies[:6]:
+        bar = "#" * int(t_val * 20)
+        click.echo(f"  {t_name.replace('_', ' '):<25} [{bar:<20}] {t_val:.0%}")
+
+    click.echo(f"\nVirtue Relations:")
+    for rel in g.virtue_relations[:5]:
+        source_name = next((v["name"] for v in VIRTUES if v["id"] == rel.source_virtue), rel.source_virtue)
+        target_name = next((v["name"] for v in VIRTUES if v["id"] == rel.target_virtue), rel.target_virtue)
+        click.echo(f"  {source_name} --[{rel.relation_type}]--> {target_name} ({rel.strength:.0%})")
+
+    click.echo(f"\nMetrics:")
+    click.echo(f"  Internal coherence: {g.internal_coherence:.0%}")
+    click.echo(f"  Stability: {g.stability:.0%}")
+
+
+# ============================================================================
+# SITUATION COMMANDS - Resource allocation scenarios
+# ============================================================================
+
+
+@cli.command()
+def situations():
+    """List available example situations."""
+    from ..situations.examples import EXAMPLE_SITUATIONS
+
+    click.echo("Available Situations:")
+    click.echo("-" * 50)
+    for name, builder in EXAMPLE_SITUATIONS.items():
+        sit = builder()
+        click.echo(f"\n  {name}")
+        click.echo(f"    {sit.description}")
+        click.echo(f"    Stakeholders: {len(sit.stakeholders)}")
+        click.echo(f"    Resources: {len(sit.resources)}")
+
+
+@cli.command()
+@click.argument("situation_name")
+def situation(situation_name):
+    """Show details of a situation."""
+    from ..situations.examples import get_example_situation
+
+    try:
+        sit = get_example_situation(situation_name)
+    except ValueError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    click.echo(f"\n=== SITUATION: {sit.name} ===")
+    click.echo(f"{sit.description}\n")
+
+    click.echo("Resources:")
+    for r in sit.resources:
+        div = "divisible" if r.divisible else "indivisible"
+        click.echo(f"  {r.name}: {r.quantity} units ({div})")
+
+    click.echo("\nStakeholders:")
+    for s in sit.stakeholders:
+        click.echo(f"\n  {s.name} ({s.id}):")
+        click.echo(f"    Need: {s.need:.0%}  Desert: {s.desert:.0%}  Urgency: {s.urgency:.0%}")
+        if s.vulnerability > 0:
+            click.echo(f"    Vulnerability: {s.vulnerability:.0%}")
+
+    click.echo("\nClaims:")
+    for c in sit.claims:
+        sh = sit.get_stakeholder(c.stakeholder_id)
+        sh_name = sh.name if sh else c.stakeholder_id
+        click.echo(f"  {sh_name} claims {c.resource_id} ({c.basis}, strength={c.strength:.0%})")
+        if c.justification:
+            click.echo(f"    \"{c.justification}\"")
+
+    if sit.relations:
+        click.echo("\nRelationships:")
+        for rel in sit.relations:
+            click.echo(f"  {rel.source_id} --[{rel.relation_type}]--> {rel.target_id}")
+
+    if sit.constraints:
+        click.echo(f"\nConstraints: {sit.constraints}")
+
+
+# ============================================================================
+# ACTION COMMANDS - Moral decision making
+# ============================================================================
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.argument("situation_name")
+@click.option("--samples", default=5, help="Number of action candidates")
+def decide(agent_id, situation_name, samples):
+    """Generate action distribution for an agent facing a situation."""
+    from ..gestalt import compute_gestalt
+    from ..situations.examples import get_example_situation
+    from ..actions import get_action_distribution
+    from ..actions.generate import describe_action
+    from ..virtues.anchors import VIRTUES
+
+    click.echo(f"Computing decision for {agent_id} facing {situation_name}...")
+
+    # Get gestalt
+    g = compute_gestalt(agent_id)
+    click.echo(f"  Gestalt: {g.archetype or 'untyped'}")
+
+    # Get situation
+    try:
+        sit = get_example_situation(situation_name)
+    except ValueError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    # Generate actions
+    dist = get_action_distribution(g, sit, num_samples=samples)
+
+    click.echo(f"\n=== DECISION: {agent_id} x {situation_name} ===\n")
+
+    if not dist.actions:
+        click.echo("No valid actions generated.")
+        return
+
+    click.echo(f"Consensus: {dist.consensus_score:.0%} ", nl=False)
+    if dist.consensus_score > 0.7:
+        click.echo("(clear best action)")
+    elif dist.consensus_score > 0.4:
+        click.echo("(moderate agreement)")
+    else:
+        click.echo("(genuinely ambiguous)")
+
+    # Show influential virtues
+    virtue_names = []
+    for v_id in dist.influential_virtues[:3]:
+        name = next((v["name"] for v in VIRTUES if v["id"] == v_id), v_id)
+        virtue_names.append(name)
+    click.echo(f"Influential virtues: {', '.join(virtue_names)}")
+
+    click.echo("\n" + "-" * 50)
+
+    # Show each action
+    for i, (action, prob) in enumerate(zip(dist.actions, dist.probabilities)):
+        click.echo(f"\nOption {i+1} (probability: {prob:.0%}):")
+        click.echo("-" * 30)
+
+        # Allocations
+        for alloc in action.allocations:
+            sh = sit.get_stakeholder(alloc.stakeholder_id)
+            sh_name = sh.name if sh else alloc.stakeholder_id
+            res = None
+            for r in sit.resources:
+                if r.id == alloc.resource_id:
+                    res = r
+                    break
+
+            if res and res.quantity > 0:
+                pct = alloc.amount / res.quantity * 100
+                click.echo(f"  {sh_name}: {alloc.amount:.1f} ({pct:.0f}%)")
+            else:
+                click.echo(f"  {sh_name}: {alloc.amount:.1f}")
+
+        # Justification
+        click.echo(f"\n  Justification: {action.primary_justification}")
+
+        # Trade-offs
+        if action.trade_offs:
+            click.echo(f"  Trade-offs:")
+            for t in action.trade_offs:
+                click.echo(f"    - {t}")
+
+    # Recommendation
+    top = dist.get_top_action()
+    if top:
+        click.echo(f"\n{'='*50}")
+        click.echo(f"RECOMMENDATION: {top.primary_justification}")
+        click.echo(f"Confidence: {top.confidence:.0%}")
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.argument("situation_name")
+def sample_action(agent_id, situation_name):
+    """Sample a single action from the distribution (for simulation)."""
+    from ..gestalt import compute_gestalt
+    from ..situations.examples import get_example_situation
+    from ..actions import get_action_distribution
+
+    g = compute_gestalt(agent_id)
+    try:
+        sit = get_example_situation(situation_name)
+    except ValueError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    dist = get_action_distribution(g, sit)
+    action = dist.sample_action()
+
+    if not action:
+        click.echo("No action available")
+        return
+
+    click.echo(f"Sampled action: {action.primary_justification}")
+    for alloc in action.allocations:
+        sh = sit.get_stakeholder(alloc.stakeholder_id)
+        sh_name = sh.name if sh else alloc.stakeholder_id
+        click.echo(f"  {sh_name}: {alloc.amount:.1f}")
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.option("--situation", "situation_name", default="food_scarcity",
+              help="Situation to test against")
+def character(agent_id, situation_name):
+    """Show how an agent's character influences decisions."""
+    from ..gestalt import compute_gestalt
+    from ..situations.examples import get_example_situation
+    from ..actions import get_action_distribution
+    from ..virtues.anchors import VIRTUES
+
+    g = compute_gestalt(agent_id)
+    try:
+        sit = get_example_situation(situation_name)
+    except ValueError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    click.echo(f"\n=== CHARACTER PROFILE: {agent_id} ===\n")
+
+    # Archetype
+    if g.archetype:
+        click.echo(f"Archetype: {g.archetype.upper()}")
+        click.echo("")
+
+    # Key tendencies that affect decisions
+    click.echo("Decision-Relevant Tendencies:")
+    relevant = [
+        "prioritizes_need", "prioritizes_desert", "prioritizes_equality",
+        "protects_vulnerable", "honors_commitments", "maintains_integrity"
+    ]
+    for t in relevant:
+        val = g.tendencies.get(t, 0.5)
+        bar = "#" * int(val * 15)
+        click.echo(f"  {t.replace('_', ' '):<25} [{bar:<15}] {val:.0%}")
+
+    # How this plays out in the situation
+    click.echo(f"\nIn situation '{situation_name}':")
+
+    dist = get_action_distribution(g, sit, num_samples=3)
+    if dist.actions:
+        top = dist.get_top_action()
+        click.echo(f"  Would likely: {top.primary_justification}")
+        click.echo(f"  Certainty: {dist.consensus_score:.0%}")
+
+        if top.trade_offs:
+            click.echo(f"  Acknowledges: {top.trade_offs[0]}")
+
+    # Virtues driving this
+    click.echo(f"\nDriving virtues:")
+    for v_id in dist.influential_virtues[:3]:
+        name = next((v["name"] for v in VIRTUES if v["id"] == v_id), v_id)
+        act = g.virtue_activations.get(v_id, 0)
+        click.echo(f"  {name}: {act:.0%}")
