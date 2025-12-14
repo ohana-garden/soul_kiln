@@ -3,6 +3,7 @@ import os
 import json
 from anthropic import Anthropic
 from ..graph.client import get_client
+from ..knowledge.episodes import record_episode
 from .introspect import introspect
 
 
@@ -64,10 +65,23 @@ Respond with JSON:
         messages=[{"role": "user", "content": context}]
     )
 
+    thought_text = response.content[0].text
+    tokens_used = response.usage.input_tokens + response.usage.output_tokens
+
+    # Record episode for telepathy - all agents can now see this thought
+    episode_id = record_episode(
+        agent_id=agent_id,
+        episode_type="thought",
+        content=thought_text,
+        stimulus=stimulus,
+        tokens_used=tokens_used,
+    )
+
     return {
         "agent": agent_id,
-        "thought": response.content[0].text,
-        "context_size": len(context)
+        "thought": thought_text,
+        "context_size": len(context),
+        "episode_id": episode_id,
     }
 
 
@@ -110,10 +124,23 @@ Respond briefly (2-3 sentences) with your reflection.
         messages=[{"role": "user", "content": prompt}]
     )
 
+    reflection_text = response.content[0].text
+    tokens_used = response.usage.input_tokens + response.usage.output_tokens
+
+    # Record episode for telepathy
+    episode_id = record_episode(
+        agent_id=agent_id,
+        episode_type="reflection",
+        content=reflection_text,
+        stimulus=topic,
+        tokens_used=tokens_used,
+    )
+
     return {
         "agent": agent_id,
         "topic": topic,
-        "reflection": response.content[0].text
+        "reflection": reflection_text,
+        "episode_id": episode_id,
     }
 
 

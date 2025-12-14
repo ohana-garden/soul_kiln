@@ -162,3 +162,28 @@ class CharacterProfile(BaseModel):
     virtue_affinities: dict[str, float] = Field(default_factory=dict)
     basin_depths: dict[str, float] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class EpisodeType(str, Enum):
+    """Types of episodes that can be recorded."""
+    THOUGHT = "thought"
+    REFLECTION = "reflection"
+    ACTION = "action"
+    OBSERVATION = "observation"
+
+
+class Episode(BaseModel):
+    """
+    An episode in the shared knowledge graph.
+
+    Episodes record agent thoughts, reflections, and actions.
+    All agents can query episodes from any other agent - this is telepathy.
+    """
+    id: str
+    agent_id: str
+    episode_type: EpisodeType
+    content: str
+    stimulus: str | None = None
+    tokens_used: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    metadata: dict = Field(default_factory=dict)

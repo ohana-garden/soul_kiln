@@ -20,6 +20,11 @@ def init_schema():
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Pathway) ON (n.id)")
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Warning) ON (n.id)")
 
+    # Telepathy: Episode indexes for cross-agent knowledge sharing
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Episode) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Episode) ON (n.agent_id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Episode) ON (n.episode_type)")
+
 
 def clear_graph():
     """Delete all nodes and edges. Use carefully."""
