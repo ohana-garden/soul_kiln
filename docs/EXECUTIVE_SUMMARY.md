@@ -54,6 +54,16 @@ Each community defines its own virtue emphasis through cluster and individual mo
 
 Communities can grow, shrink, and evolve, but they cannot devolve or become malignant. The virtue attractor system ensures that no matter how a community changes, its agents remain bound by the foundational requirement of trust and the aspirational pull of the broader virtue landscape. Agents always belong to at least one community and remain answerable to their human creators.
 
+## Conversational Agent Creation
+
+Soul Kiln provides a fully conversational experience for creating agents. Rather than filling out forms or running commands, users simply describe what they need in natural language. An intake conversation guides them through understanding their situation, matching them to the right community, gathering relevant context, and creating an agent configured for their specific needs.
+
+The intake process flows naturally: a user might say "I need help getting grants for my nonprofit," and the system recognizes this as a Grant-Getter need. Through conversation, it learns about their organization, mission, target population, and current goals. This context becomes part of the agent's configuration, allowing the new agent to understand and serve them from the first interaction.
+
+When the agent is created, it introduces itself with full awareness of the gathered context. A Grant-Getter agent created for a STEM education nonprofit arrives ready to help find relevant grants, understanding the organization's focus areas and experience level. The handoff is seamless—one moment the user is talking to the intake system, the next they're working with their dedicated agent.
+
+Each community defines markdown-based prompts that shape agent behavior. The main system prompt establishes the agent's identity, values, and capabilities. Tool guidance prompts explain how to use each capability effectively. These prompts can reference the gathered context, allowing truly personalized agent experiences while maintaining the virtue-aligned behavior that Soul Kiln ensures.
+
 ## Collective Learning and Knowledge
 
 Soul Kiln embodies the principle that knowledge belongs to the collective. The shared knowledge pool accumulates lessons from every agent's journey, recording what works, what fails, and why. When an agent achieves a virtue through a particular path, that pathway strengthens for all. When an agent struggles and eventually dissolves, the lessons from that struggle remain available to guide others away from the same pitfalls.
