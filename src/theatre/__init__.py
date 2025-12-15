@@ -2,7 +2,7 @@
 Theatre Module.
 
 Theatrical UX for soul_kiln with graph-based topic detection,
-three-agent conversation orchestration, and scene generation.
+three-agent conversation orchestration, and dual-view system.
 
 Philosophy: "Yes, and..." - Everything is incorporated smoothly.
 The conversation is always already happening when you arrive.
@@ -14,8 +14,12 @@ Architecture:
 4. TopicDetector tracks topic via spreading activation
 5. User Proxy echoes/interprets user input
 6. Builder and Current Agent respond
-7. SceneGenerator produces visual from graph state
+7. ViewManager decides what to show (workspace or graph)
 8. CaptionRenderer displays conversation
+
+Two views available:
+- Workspace: Primary utilitarian view with contextual artifacts
+- Graph: The actual semantic graph (truth layer), always available
 
 Key insight: Since User Proxy echoes all user input, ALL I/O
 flows through agents. This means we can use the knowledge graph
@@ -34,6 +38,14 @@ from .orchestrator import (
 )
 from .captions import CaptionRenderer, Caption, CaptionStyle, CaptionPosition
 from .hume_integration import HumeIntegration, EmotionalState, EmotionCategory
+from .artifacts import (
+    ArtifactCurator,
+    Artifact,
+    ArtifactType,
+    ArtifactRequest,
+)
+from .graph_view import GraphViewRenderer, GraphViewState, GraphNode, GraphEdge
+from .views import ViewManager, ViewType, ViewState, WorkspaceState
 from .integration import TheatreSystem, TheatreConfig, create_theatre
 
 __all__ = [
@@ -45,7 +57,7 @@ __all__ = [
     "TopicState",
     "TopicShift",
     "TopicRegion",
-    # Scene generation
+    # Scene generation (legacy, kept for compatibility)
     "SceneGenerator",
     "Scene",
     "SceneElement",
@@ -65,6 +77,21 @@ __all__ = [
     "HumeIntegration",
     "EmotionalState",
     "EmotionCategory",
+    # Artifacts
+    "ArtifactCurator",
+    "Artifact",
+    "ArtifactType",
+    "ArtifactRequest",
+    # Graph view
+    "GraphViewRenderer",
+    "GraphViewState",
+    "GraphNode",
+    "GraphEdge",
+    # View management
+    "ViewManager",
+    "ViewType",
+    "ViewState",
+    "WorkspaceState",
     # Integration
     "TheatreSystem",
     "TheatreConfig",

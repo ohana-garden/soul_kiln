@@ -10,8 +10,12 @@ Architecture:
 4. TopicDetector tracks topic via activation →
 5. User Proxy echoes/interprets →
 6. Builder and Agent respond →
-7. SceneGenerator produces visual →
+7. ViewManager decides what to show →
 8. CaptionRenderer displays conversation
+
+Two views available:
+- Workspace: Primary utilitarian view with contextual artifacts
+- Graph: The actual semantic graph (truth layer), always available
 
 "Yes, and..." - everything flows smoothly.
 """
@@ -32,6 +36,9 @@ from .orchestrator import (
 )
 from .captions import CaptionRenderer, Caption, get_caption_renderer
 from .hume_integration import HumeIntegration, EmotionalState, get_hume_integration
+from .artifacts import ArtifactCurator, Artifact, ArtifactRequest, get_artifact_curator
+from .graph_view import GraphViewRenderer, get_graph_view_renderer
+from .views import ViewManager, ViewType, ViewState, get_view_manager
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +51,7 @@ class TheatreConfig:
     enable_emotions: bool = True
     enable_scene_generation: bool = True
     enable_captions: bool = True
+    enable_artifacts: bool = True
 
     # Timing
     scene_blend_duration: float = 2.0
@@ -53,10 +61,12 @@ class TheatreConfig:
     # Display
     max_visible_captions: int = 3
     caption_overlap: bool = True
+    default_view: ViewType = ViewType.WORKSPACE
 
     # Integration
     hume_api_key: str | None = None
     llm_fn: Callable[[str, str], str] | None = None
+    image_generator_fn: Callable[[str], str] | None = None
 
 
 class TheatreSystem:
@@ -91,6 +101,8 @@ class TheatreSystem:
         caption_renderer: CaptionRenderer,
         hume: HumeIntegration | None,
         concept_extractor: ConceptExtractor,
+        view_manager: ViewManager,
+        artifact_curator: ArtifactCurator,
     ):
         """
         Initialize the theatre system.
@@ -104,6 +116,8 @@ class TheatreSystem:
         self.caption_renderer = caption_renderer
         self.hume = hume
         self.extractor = concept_extractor
+        self.view_manager = view_manager
+        self.artifact_curator = artifact_curator
 
         # Wire up callbacks
         self._setup_callbacks()
@@ -162,6 +176,22 @@ class TheatreSystem:
         if config.enable_emotions:
             hume = HumeIntegration(api_key=config.hume_api_key)
 
+        # Create artifact curator
+        artifact_curator = ArtifactCurator()
+        if substrate:
+            artifact_curator.set_substrate(substrate)
+        if config.image_generator_fn:
+            artifact_curator.set_image_generator(config.image_generator_fn)
+
+        # Create graph view renderer
+        graph_renderer = GraphViewRenderer(substrate=substrate)
+
+        # Create view manager
+        view_manager = ViewManager(
+            artifact_curator=artifact_curator,
+            graph_renderer=graph_renderer,
+        )
+
         orchestrator = TheatreOrchestrator(
             topic_detector=topic_detector,
             scene_generator=scene_generator,
@@ -178,11 +208,13 @@ class TheatreSystem:
             caption_renderer=caption_renderer,
             hume=hume,
             concept_extractor=extractor,
+            view_manager=view_manager,
+            artifact_curator=artifact_curator,
         )
 
     def _setup_callbacks(self) -> None:
         """Set up internal callbacks between components."""
-        # Topic shifts trigger scene updates
+        # Topic shifts trigger updates
         self.topic_detector.on_shift(self._on_topic_shift)
 
         # New turns create captions
@@ -191,13 +223,28 @@ class TheatreSystem:
         # Caption updates notify display
         self.caption_renderer.on_update(self._on_caption_update)
 
+        # Artifact surfaces notify display
+        self.artifact_curator.on_surface(self._on_artifact_surface)
+
     def _on_topic_shift(self, shift: TopicShift) -> None:
         """Handle topic shift events."""
         logger.info(f"Topic shift: {shift.from_region} → {shift.to_region}")
 
-        if self.config.enable_scene_generation:
-            # Scene generator handles this through orchestrator
-            pass
+        # Update view manager with new topic state
+        topic_state = self.topic_detector.current_state
+        if topic_state:
+            self.view_manager.update_topic(topic_state)
+
+            # Auto-surface relevant artifacts
+            if self.config.enable_artifacts:
+                self.artifact_curator.surface_from_topic(topic_state)
+
+    def _on_artifact_surface(self, artifact: Artifact) -> None:
+        """Handle artifact surface events."""
+        logger.debug(f"Artifact surfaced: {artifact.title}")
+        # View manager already has the artifact through curator
+        # Just trigger display update
+        self._notify_display_update()
 
     def _on_turn(self, turn: ConversationTurn) -> None:
         """Handle new conversation turns."""
@@ -214,7 +261,15 @@ class TheatreSystem:
 
     def _on_caption_update(self, captions: list[Caption]) -> None:
         """Handle caption updates."""
+        # Update view manager with captions
+        self.view_manager.update_captions(
+            [c.to_render_dict() for c in captions]
+        )
         # Notify display callbacks
+        self._notify_display_update()
+
+    def _notify_display_update(self) -> None:
+        """Notify all display callbacks of update."""
         display_state = self.get_display_state()
         for callback in self._display_callbacks:
             try:
@@ -243,6 +298,9 @@ class TheatreSystem:
         if self.config.enable_captions:
             self.caption_renderer.start()
 
+        # Set community in view manager
+        self.view_manager.set_community(community)
+
         # Start orchestrator session
         context = self.orchestrator.start_session(
             human_id=human_id,
@@ -256,6 +314,7 @@ class TheatreSystem:
             "session_id": context.session_id,
             "state": self.orchestrator.state.value,
             "community": community,
+            "view": self.view_manager.current_view.value,
         }
 
     def process(
@@ -302,21 +361,46 @@ class TheatreSystem:
         Get current display state for rendering.
 
         Returns:
-            Complete display state including scene and captions
+            Complete display state based on current view
         """
-        scene = self.scene_generator.current_scene
-        captions = self.caption_renderer.get_render_data()
-        topic_state = self.topic_detector.current_state
+        # Get base state from view manager
+        view_data = self.view_manager.get_render_data()
 
-        return {
-            "scene": scene.to_dict() if scene else None,
-            "captions": captions,
-            "topic": {
-                "region": topic_state.primary_region.value if topic_state else "unknown",
-                "confidence": topic_state.confidence if topic_state else 0.0,
-            },
-            "theatre_state": self.orchestrator.state.value,
-        }
+        # Add theatre state
+        view_data["theatre_state"] = self.orchestrator.state.value
+
+        return view_data
+
+    def switch_view(self, view_type: ViewType | str) -> dict:
+        """
+        Switch between workspace and graph view.
+
+        Args:
+            view_type: Target view type (or string "workspace"/"graph")
+
+        Returns:
+            New view state
+        """
+        if isinstance(view_type, str):
+            view_type = ViewType(view_type)
+
+        state = self.view_manager.switch_to(view_type)
+        return state.to_dict()
+
+    def toggle_view(self) -> dict:
+        """
+        Toggle between workspace and graph view.
+
+        Returns:
+            New view state
+        """
+        state = self.view_manager.toggle_view()
+        return state.to_dict()
+
+    @property
+    def current_view(self) -> ViewType:
+        """Get current view type."""
+        return self.view_manager.current_view
 
     def switch_community(self, community: str) -> dict:
         """
@@ -328,12 +412,55 @@ class TheatreSystem:
         Returns:
             Switch result
         """
+        # Update view manager
+        self.view_manager.set_community(community)
+
+        # Switch orchestrator agent
         persona = self.orchestrator.switch_agent(community)
         return {
             "community": community,
             "agent_name": persona.name,
             "agent_role": persona.role.value,
         }
+
+    def surface_artifact(
+        self,
+        context: str,
+        artifact_type: str | None = None,
+    ) -> dict | None:
+        """
+        Request an artifact to be surfaced in workspace.
+
+        Args:
+            context: What we're trying to show/explain
+            artifact_type: Optional preferred type
+
+        Returns:
+            Artifact info if surfaced, None otherwise
+        """
+        from .artifacts import ArtifactType, ArtifactRequest
+
+        type_hint = None
+        if artifact_type:
+            type_hint = ArtifactType(artifact_type)
+
+        request = ArtifactRequest(
+            context=context,
+            type_hint=type_hint,
+            topic_state=self.topic_detector.current_state,
+            concepts=self.topic_detector.current_state.active_concepts[:5]
+            if self.topic_detector.current_state
+            else [],
+        )
+
+        artifact = self.artifact_curator.request_artifact(request)
+        if artifact:
+            return artifact.to_dict()
+        return None
+
+    def dismiss_artifact(self, artifact_id: str) -> bool:
+        """Dismiss an artifact from workspace."""
+        return self.artifact_curator.dismiss(artifact_id)
 
     def end_session(self) -> dict:
         """
@@ -371,6 +498,8 @@ class TheatreSystem:
             "captions": self.caption_renderer.get_stats(),
             "topic": self.topic_detector.get_topic_summary(),
             "emotional_trend": self.hume.get_trend() if self.hume else None,
+            "current_view": self.view_manager.current_view.value,
+            "active_artifacts": len(self.artifact_curator.get_active_artifacts()),
         }
 
 
