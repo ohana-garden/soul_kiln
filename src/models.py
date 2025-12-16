@@ -793,3 +793,273 @@ class ActionDistribution(BaseModel):
         if not self.actions:
             return None
         return random.choices(self.actions, weights=self.probabilities, k=1)[0]
+
+
+# ============================================================================
+# PERSONA CAPSULE MODELS - KG-Persona compilation for LLM conditioning
+# ============================================================================
+
+
+class TemporalFact(BaseModel):
+    """
+    A fact with temporal validity.
+
+    Facts can be current, expired, or superseded. This enables
+    persona evolution tracking and "who they were vs who they are."
+    """
+    id: str
+    subject: str  # Entity this fact is about
+    predicate: str  # Relationship type
+    object: str  # Value or target entity
+
+    # Temporal validity
+    valid_at: datetime = Field(default_factory=datetime.utcnow)
+    invalid_at: datetime | None = None  # None = still valid
+
+    # Provenance
+    evidence_type: Literal["interaction", "lesson", "declaration", "inference", "default"] = "inference"
+    evidence_id: str | None = None  # Link to source (lesson_id, interaction_id, etc.)
+
+    # Confidence
+    confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+    # Supersession
+    supersedes: str | None = None  # ID of fact this replaces
+    superseded_by: str | None = None  # ID of fact that replaced this
+
+    def is_valid(self, at_time: datetime | None = None) -> bool:
+        """Check if fact is valid at a given time (default: now)."""
+        check_time = at_time or datetime.utcnow()
+        if check_time < self.valid_at:
+            return False
+        if self.invalid_at and check_time >= self.invalid_at:
+            return False
+        return True
+
+
+class PersonaBoundary(BaseModel):
+    """
+    A hard constraint that cannot be violated.
+
+    Boundaries come from taboos, sacred commitments, or explicit rules.
+    They filter actions before soft preference ranking.
+    """
+    id: str
+    description: str
+    boundary_type: Literal["taboo", "commitment", "rule", "relationship"] = "rule"
+
+    # What it constrains
+    forbids: list[str] = Field(default_factory=list)  # Action patterns forbidden
+    requires: list[str] = Field(default_factory=list)  # Action patterns required
+
+    # Source
+    source_type: Literal["lore", "kuleana", "belief", "explicit"] = "explicit"
+    source_id: str | None = None
+
+    # Strength (for conflict resolution between boundaries)
+    priority: int = Field(default=5, ge=1, le=10)  # 1 = highest
+
+
+class PersonaValue(BaseModel):
+    """
+    A ranked value from the persona graph.
+
+    Values come from virtue activations and are ranked by strength.
+    """
+    virtue_id: str
+    name: str
+    strength: float = Field(ge=0.0, le=1.0)
+    rank: int = Field(ge=1)
+
+    # Tier indicates how foundational vs aspirational
+    tier: Literal["foundation", "aspirational"] = "aspirational"
+
+    # Evidence for why this value is held
+    grounded_in: list[str] = Field(default_factory=list)
+
+
+class PersonaPreference(BaseModel):
+    """
+    A soft preference derived from tendencies.
+
+    Preferences influence but don't constrain. They come from
+    gestalt tendencies and situational context.
+    """
+    name: str
+    description: str
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    # What it influences
+    favors: list[str] = Field(default_factory=list)  # Action patterns preferred
+    disfavors: list[str] = Field(default_factory=list)  # Action patterns avoided
+
+    # Source
+    source: Literal["tendency", "belief", "memory", "community"] = "tendency"
+
+
+class CommunityPattern(BaseModel):
+    """
+    A pattern derived from agents in the same archetype cluster.
+
+    Community patterns provide defaults when individual preferences
+    are weak or absent. They're "what agents like this one typically do."
+    """
+    archetype: str  # e.g., "guardian", "seeker"
+    pattern_name: str
+    description: str
+
+    # The pattern
+    typical_values: dict[str, float] = Field(default_factory=dict)
+    typical_tendencies: dict[str, float] = Field(default_factory=dict)
+
+    # How representative (based on cluster coherence)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    # Population size this is based on
+    sample_size: int = 0
+
+
+class PersonaUncertainty(BaseModel):
+    """
+    An explicit uncertainty or conflict in the persona.
+
+    Surfacing uncertainties helps the LLM reason about edge cases
+    rather than hallucinating false confidence.
+    """
+    description: str
+    uncertainty_type: Literal["conflict", "missing", "weak", "evolving"] = "weak"
+
+    # What's uncertain
+    involves: list[str] = Field(default_factory=list)  # Virtue/preference IDs
+
+    # How significant
+    impact: Literal["low", "medium", "high"] = "medium"
+
+
+class PersonaCapsule(BaseModel):
+    """
+    A compiled persona artifact for LLM conditioning.
+
+    The capsule is ephemeral (regenerated per context); the graph is durable.
+    It contains everything needed to condition agent behavior:
+    hard boundaries, ranked values, soft preferences, community patterns,
+    and explicit uncertainties.
+    """
+    # Identity
+    agent_id: str
+    agent_name: str | None = None
+    archetype: str | None = None
+
+    # Hard constraints (filter before ranking)
+    boundaries: list[PersonaBoundary] = Field(default_factory=list)
+
+    # Ranked values (from virtues)
+    values: list[PersonaValue] = Field(default_factory=list)
+
+    # Soft preferences (from tendencies)
+    preferences: list[PersonaPreference] = Field(default_factory=list)
+
+    # Community patterns (population hints)
+    community_patterns: list[CommunityPattern] = Field(default_factory=list)
+
+    # Explicit uncertainties
+    uncertainties: list[PersonaUncertainty] = Field(default_factory=list)
+
+    # Active roles (from kuleanas)
+    active_roles: list[str] = Field(default_factory=list)
+
+    # Style guidance (from voice patterns)
+    style_rules: list[str] = Field(default_factory=list)
+
+    # Situational context (what triggered this compilation)
+    situation_context: str | None = None
+
+    # Provenance
+    compiled_at: datetime = Field(default_factory=datetime.utcnow)
+    source_gestalt_id: str | None = None
+
+    # Citations (which graph facts contributed)
+    citations: list[str] = Field(default_factory=list)
+
+    def to_prompt_text(self) -> str:
+        """
+        Render capsule as compact text suitable for LLM prompting.
+
+        Format designed to be token-efficient while preserving structure.
+        """
+        lines = []
+
+        # Identity
+        lines.append(f"## Agent: {self.agent_name or self.agent_id}")
+        if self.archetype:
+            lines.append(f"Archetype: {self.archetype}")
+        lines.append("")
+
+        # Hard boundaries (most important - listed first)
+        if self.boundaries:
+            lines.append("## Hard Boundaries (never violate)")
+            for b in sorted(self.boundaries, key=lambda x: x.priority):
+                lines.append(f"- {b.description}")
+                if b.forbids:
+                    lines.append(f"  Forbids: {', '.join(b.forbids)}")
+                if b.requires:
+                    lines.append(f"  Requires: {', '.join(b.requires)}")
+            lines.append("")
+
+        # Values (ranked)
+        if self.values:
+            lines.append("## Values (ranked by strength)")
+            for v in self.values[:7]:  # Top 7 values
+                tier_marker = "*" if v.tier == "foundation" else ""
+                lines.append(f"{v.rank}. {v.name}{tier_marker} ({v.strength:.0%})")
+            lines.append("")
+
+        # Active roles
+        if self.active_roles:
+            lines.append(f"## Active Roles: {', '.join(self.active_roles)}")
+            lines.append("")
+
+        # Preferences (soft)
+        if self.preferences:
+            lines.append("## Preferences (soft, context-dependent)")
+            for p in sorted(self.preferences, key=lambda x: -x.strength)[:5]:
+                lines.append(f"- {p.name}: {p.description} ({p.strength:.0%})")
+            lines.append("")
+
+        # Community patterns (lower weight)
+        if self.community_patterns:
+            lines.append("## Population Patterns (agents like this typically...)")
+            for cp in self.community_patterns:
+                lines.append(f"- [{cp.archetype}] {cp.description} ({cp.confidence:.0%} confidence)")
+            lines.append("")
+
+        # Style
+        if self.style_rules:
+            lines.append("## Style")
+            for rule in self.style_rules[:3]:
+                lines.append(f"- {rule}")
+            lines.append("")
+
+        # Uncertainties (important for honest reasoning)
+        if self.uncertainties:
+            lines.append("## Uncertainties / Conflicts")
+            for u in self.uncertainties:
+                lines.append(f"- [{u.uncertainty_type}] {u.description}")
+            lines.append("")
+
+        # Context
+        if self.situation_context:
+            lines.append(f"## Current Context: {self.situation_context}")
+
+        return "\n".join(lines)
+
+    def get_hard_constraints(self) -> dict:
+        """Get structured hard constraints for programmatic checking."""
+        return {
+            "forbidden": [f for b in self.boundaries for f in b.forbids],
+            "required": [r for b in self.boundaries for r in b.requires],
+        }
+
+    def get_value_weights(self) -> dict[str, float]:
+        """Get virtue weights for scoring."""
+        return {v.virtue_id: v.strength for v in self.values}

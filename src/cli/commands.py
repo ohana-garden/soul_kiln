@@ -1039,3 +1039,216 @@ def list_saved():
     for sit in saved:
         click.echo(f"  {sit['id']}: {sit['name']}")
         click.echo(f"    {sit['stakeholder_count']} stakeholders, {sit['resource_count']} resources")
+
+
+# ============================================================================
+# PERSONA CAPSULE COMMANDS
+# ============================================================================
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.option("--context", "-c", default=None, help="Situation context text")
+@click.option("--format", "-f", "output_format", default="text",
+              type=click.Choice(["text", "json", "brief"]),
+              help="Output format")
+def persona(agent_id, context, output_format):
+    """Compile a persona capsule for an agent.
+
+    The persona capsule is a structured representation of the agent's
+    character suitable for LLM conditioning. It includes:
+    - Hard boundaries (taboos, commitments)
+    - Ranked values (from virtues)
+    - Soft preferences (from tendencies)
+    - Community patterns (archetype typical behaviors)
+    - Explicit uncertainties
+    """
+    from ..persona import compile_persona_capsule
+
+    capsule = compile_persona_capsule(agent_id, context)
+
+    if output_format == "json":
+        import json
+        click.echo(json.dumps(capsule.model_dump(), indent=2, default=str))
+    elif output_format == "brief":
+        click.echo(f"\n=== PERSONA: {capsule.agent_name or capsule.agent_id} ===\n")
+        if capsule.archetype:
+            click.echo(f"Archetype: {capsule.archetype}")
+        if capsule.values:
+            top_values = ", ".join(f"{v.name} ({v.strength:.0%})" for v in capsule.values[:3])
+            click.echo(f"Top Values: {top_values}")
+        if capsule.boundaries:
+            click.echo(f"Boundaries: {len(capsule.boundaries)}")
+        if capsule.uncertainties:
+            click.echo(f"Uncertainties: {len(capsule.uncertainties)}")
+    else:
+        # Full text format
+        click.echo(capsule.to_prompt_text())
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.argument("situation_name")
+def persona_for(agent_id, situation_name):
+    """Compile a persona capsule tailored to a specific situation.
+
+    Uses the structured situation to filter relevant preferences and roles.
+    """
+    from ..persona import compile_for_situation
+    from ..situations import get_example_situation
+
+    try:
+        situation = get_example_situation(situation_name)
+    except ValueError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    capsule = compile_for_situation(agent_id, situation)
+    click.echo(capsule.to_prompt_text())
+
+
+@cli.command()
+@click.option("--refresh", is_flag=True, help="Force refresh cached patterns")
+def archetype_patterns(refresh):
+    """Show community patterns for all archetypes.
+
+    Displays the typical values and tendencies for each archetype,
+    computed from the agent population (or from priors if no population).
+    """
+    from ..persona.community import compute_archetype_patterns, ARCHETYPE_PRIORS
+
+    stats = compute_archetype_patterns(force_refresh=refresh)
+
+    for archetype in ["guardian", "seeker", "servant", "contemplative"]:
+        click.echo(f"\n=== {archetype.upper()} ===\n")
+
+        prior = ARCHETYPE_PRIORS.get(archetype, {})
+        click.echo(f"Description: {prior.get('description', 'N/A')}")
+
+        if archetype in stats:
+            arch_stats = stats[archetype]
+            click.echo(f"Agents in cluster: {arch_stats.agent_count}")
+            click.echo(f"Cluster coherence: {arch_stats.coherence:.0%}")
+
+            # Top values
+            if arch_stats.mean_values:
+                from ..virtues.anchors import VIRTUES
+                top = sorted(arch_stats.mean_values.items(), key=lambda x: -x[1])[:5]
+                click.echo("Top values:")
+                for v_id, strength in top:
+                    v_name = next((v["name"] for v in VIRTUES if v["id"] == v_id), v_id)
+                    click.echo(f"  - {v_name}: {strength:.0%}")
+
+            # Top tendencies
+            if arch_stats.mean_tendencies:
+                top = sorted(arch_stats.mean_tendencies.items(), key=lambda x: -x[1])[:5]
+                click.echo("Top tendencies:")
+                for t_name, strength in top:
+                    click.echo(f"  - {t_name.replace('_', ' ')}: {strength:.0%}")
+
+        # Characteristic behaviors
+        behaviors = prior.get("characteristic_behaviors", [])
+        if behaviors:
+            click.echo("Typical behaviors:")
+            for b in behaviors:
+                click.echo(f"  - {b}")
+
+
+@cli.command()
+@click.argument("agent_id")
+def archetype_compare(agent_id):
+    """Compare an agent to their archetype's typical pattern.
+
+    Shows how the agent differs from the population average
+    for their archetype cluster.
+    """
+    from ..gestalt import compute_gestalt
+    from ..persona.community import compare_to_archetype
+
+    gestalt = compute_gestalt(agent_id)
+    comparison = compare_to_archetype(gestalt)
+
+    click.echo(f"\n=== {agent_id} vs {comparison['archetype'] or 'untyped'} archetype ===\n")
+    click.echo(f"Alignment with archetype: {comparison['alignment']:.0%}")
+
+    if comparison["above_typical"]:
+        click.echo("\nAbove typical (distinctive strengths):")
+        for item, diff in comparison["above_typical"]:
+            click.echo(f"  + {item}: +{diff:.0%}")
+
+    if comparison["below_typical"]:
+        click.echo("\nBelow typical:")
+        for item, diff in comparison["below_typical"]:
+            click.echo(f"  - {item}: {diff:.0%}")
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.argument("predicate")
+@click.argument("value")
+@click.option("--evidence", "-e", default=None, help="Evidence ID (e.g., lesson_123)")
+def record_fact(agent_id, predicate, value, evidence):
+    """Record a temporal fact about an agent.
+
+    Facts have valid_at timestamps and can be superseded by later facts,
+    enabling "who they were vs who they are" queries.
+
+    Example predicates: prefers, has_value, tendency, commitment
+    """
+    from ..persona.temporal import create_fact, update_fact
+
+    # Check if fact already exists (update vs create)
+    from ..persona.temporal import get_store
+    store = get_store()
+    existing = store.query(subject=agent_id, predicate=predicate)
+
+    if existing:
+        old, new = update_fact(
+            agent_id, predicate, value,
+            evidence_type="declaration" if not evidence else "lesson",
+            evidence_id=evidence,
+        )
+        click.echo(f"Updated fact: {predicate}")
+        click.echo(f"  Old: {old.object}")
+        click.echo(f"  New: {new.object}")
+    else:
+        fact = create_fact(
+            agent_id, predicate, value,
+            evidence_type="declaration" if not evidence else "lesson",
+            evidence_id=evidence,
+        )
+        click.echo(f"Created fact: {fact.id}")
+        click.echo(f"  {predicate} = {value}")
+
+
+@cli.command()
+@click.argument("agent_id")
+@click.argument("predicate")
+def fact_history(agent_id, predicate):
+    """Show the history of a fact over time.
+
+    Displays how a fact's value has changed, including when
+    each value was valid.
+    """
+    from ..persona.temporal import get_store
+
+    store = get_store()
+    history = store.get_fact_history(agent_id, predicate)
+
+    if not history:
+        click.echo(f"No history found for {agent_id}.{predicate}")
+        return
+
+    click.echo(f"\n=== History: {agent_id}.{predicate} ===\n")
+
+    for fact in history:
+        status = "CURRENT" if fact.is_valid() else "expired"
+        click.echo(f"[{status}] {fact.object}")
+        click.echo(f"  Valid from: {fact.valid_at}")
+        if fact.invalid_at:
+            click.echo(f"  Expired at: {fact.invalid_at}")
+        if fact.evidence_id:
+            click.echo(f"  Evidence: {fact.evidence_type}:{fact.evidence_id}")
+        if fact.supersedes:
+            click.echo(f"  Supersedes: {fact.supersedes}")
+        click.echo()
