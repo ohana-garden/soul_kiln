@@ -4,7 +4,7 @@ Skill definitions for the Student Financial Advocacy Platform.
 Skills are organized by type: HARD, SOFT, DOMAIN, RITUAL.
 """
 
-from src.models import Skill, SkillType
+from ..models import Skill, SkillType
 
 AMBASSADOR_SKILLS = {
     # HARD SKILLS - Concrete, measurable capabilities

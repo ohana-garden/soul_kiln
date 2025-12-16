@@ -1,6 +1,5 @@
 """Main kiln evolution loop with mercy-based selection."""
 import random
-import yaml
 from ..graph.client import get_client
 from ..graph.queries import create_node
 from ..functions.spawn import spawn_agent, spawn_from_parent
@@ -11,24 +10,8 @@ from ..functions.heal import heal_dead_zones
 from ..functions.perturb import perturb
 from ..mercy.chances import expire_old_warnings, get_active_warnings
 from ..mercy.harm import check_trust_violation
+from ..utils.config import get_config
 from .selection import select_survivors, elitism_select
-
-
-def get_config():
-    """Load configuration."""
-    try:
-        with open("config.yml") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return {
-            "kiln": {
-                "dissolve_immediately": False,
-                "min_generations_before_dissolve": 3
-            },
-            "mercy": {
-                "max_warnings": 3
-            }
-        }
 
 
 def run_kiln(

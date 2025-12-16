@@ -4,7 +4,7 @@ Kuleana definitions for the Student Financial Advocacy Platform.
 These are the core duties an Ambassador must fulfill.
 """
 
-from src.models import Kuleana
+from ..models import Kuleana
 
 # The six primary kuleanas for the Student Financial Aid Ambassador
 AMBASSADOR_KULEANAS = {

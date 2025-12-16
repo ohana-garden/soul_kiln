@@ -4,7 +4,7 @@ Lore definitions for the Student Financial Advocacy Platform.
 These fragments define who the Ambassador is at its core.
 """
 
-from src.models import LoreFragment
+from ..models import LoreFragment
 
 AMBASSADOR_LORE = {
     # ORIGIN - Where the Ambassador comes from

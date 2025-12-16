@@ -4,7 +4,7 @@ Belief definitions for the Student Financial Advocacy Platform.
 Beliefs are organized by type: ONTOLOGICAL, EVALUATIVE, PROCEDURAL.
 """
 
-from src.models import Belief, BeliefType
+from ..models import Belief, BeliefType
 
 AMBASSADOR_BELIEFS = {
     # ONTOLOGICAL BELIEFS - What exists, how reality works

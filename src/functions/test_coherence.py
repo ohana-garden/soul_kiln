@@ -1,31 +1,12 @@
 """Coherence testing for agents with two-tier virtue evaluation."""
 import random
 import uuid
-import yaml
 from ..graph.client import get_client
 from ..graph.queries import create_node, create_edge
+from ..utils.config import get_config
 from .spread import spread_activation
 from .hebbian import hebbian_update
 from ..virtues.tiers import is_foundation
-
-
-def get_config():
-    """Load configuration."""
-    try:
-        with open("config.yml") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return {
-            "coherence": {
-                "foundation_capture_rate": 0.99,
-                "aspirational_capture_rate": 0.80,
-                "min_coverage": 10,
-                "max_dominance": 0.40,
-                "growth_matters": True,
-                "growth_threshold": 0.05,
-                "stimulus_count": 100
-            }
-        }
 
 
 def generate_stimuli(count: int = 100) -> list:

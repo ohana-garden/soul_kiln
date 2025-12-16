@@ -8,9 +8,9 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from src.graph.client import get_client
-from src.graph.queries import create_node, create_edge
-from src.models import IdentityCore, NodeType, EdgeType
+from ..graph.client import get_client
+from ..graph.queries import create_node, create_edge
+from ..models import IdentityCore, NodeType, EdgeType
 
 logger = logging.getLogger(__name__)
 

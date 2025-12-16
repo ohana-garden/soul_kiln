@@ -3,7 +3,7 @@
 import pytest
 import math
 
-from src.dynamics.activation import tanh, sigmoid
+from src.utils.activation import tanh, sigmoid
 
 
 class TestActivationFunctions:

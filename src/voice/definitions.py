@@ -4,7 +4,7 @@ Voice definitions for the Student Financial Advocacy Platform.
 Defines tone, lexicon rules, emotion responses, and boundaries.
 """
 
-from src.models import VoicePattern
+from ..models import VoicePattern
 
 AMBASSADOR_VOICE = {
     # TONE PATTERNS

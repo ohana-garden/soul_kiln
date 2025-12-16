@@ -1,22 +1,8 @@
 """Activation spread function with collective learning support."""
-import math
 from ..graph.client import get_client
 from ..graph.queries import get_neighbors, get_node_activation, set_node_activation
+from ..utils.activation import sigmoid, tanh
 from ..virtues.tiers import is_foundation
-
-
-def tanh(x: float) -> float:
-    """Hyperbolic tangent activation function."""
-    return math.tanh(x)
-
-
-def sigmoid(x: float) -> float:
-    """Sigmoid activation function."""
-    if x < -500:
-        return 0.0
-    if x > 500:
-        return 1.0
-    return 1 / (1 + math.exp(-x))
 
 
 def spread_activation(

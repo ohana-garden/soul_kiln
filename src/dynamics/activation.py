@@ -16,7 +16,6 @@ Where:
 """
 
 import logging
-import math
 from datetime import datetime
 from typing import Callable
 
@@ -29,18 +28,9 @@ from src.constants import (
     SPREAD_DAMPENING,
 )
 from src.models import Node, Trajectory
+from src.utils.activation import sigmoid, tanh
 
 logger = logging.getLogger(__name__)
-
-
-def tanh(x: float) -> float:
-    """Hyperbolic tangent activation function."""
-    return math.tanh(x)
-
-
-def sigmoid(x: float) -> float:
-    """Sigmoid bounding function."""
-    return 1.0 / (1.0 + math.exp(-x))
 
 
 class ActivationSpreader:

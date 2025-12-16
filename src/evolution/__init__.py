@@ -7,13 +7,14 @@ Implements evolutionary search for valid soul topologies using:
 - Crossover operators
 - Mutation operators
 - Generational evolution loop
+- Topology evaluation
 """
 
 from src.evolution.population import Population, Individual
 from src.evolution.selection import Selection
 from src.evolution.crossover import Crossover
 from src.evolution.mutation import Mutation
-from src.evolution.loop import EvolutionLoop
+from src.evolution.loop import EvolutionLoop, TopologyEvaluator
 
 __all__ = [
     "Population",
@@ -22,4 +23,5 @@ __all__ = [
     "Crossover",
     "Mutation",
     "EvolutionLoop",
+    "TopologyEvaluator",
 ]

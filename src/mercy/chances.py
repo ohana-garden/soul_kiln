@@ -7,24 +7,9 @@ to learn and improve.
 
 from datetime import datetime, timedelta
 import uuid
-import yaml
 from ..graph.client import get_client
 from ..graph.queries import create_node, create_edge
-
-
-def get_config():
-    """Load configuration."""
-    try:
-        with open("config.yml") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return {
-            "mercy": {
-                "max_warnings": 3,
-                "warning_decay_hours": 24,
-                "teaching_weight": 0.8
-            }
-        }
+from ..utils.config import get_config
 
 
 def issue_warning(

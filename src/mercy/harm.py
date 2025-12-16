@@ -9,26 +9,8 @@ Intent matters. Did the agent KNOW this would cause harm?
 
 from ..graph.client import get_client
 from ..knowledge.pool import add_lesson
+from ..utils.config import get_config
 from .chances import issue_warning, get_active_warnings
-import yaml
-
-
-def get_config():
-    """Load configuration."""
-    try:
-        with open("config.yml") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        return {
-            "harm": {
-                "trust_violation_immediate": False,
-                "knowledge_poisoning_immediate": True,
-                "harm_cascade_threshold": 3
-            },
-            "mercy": {
-                "max_warnings": 3
-            }
-        }
 
 
 def detect_deliberate_harm(
