@@ -7,6 +7,12 @@ Shows activation patterns, node relationships, and allows exploration.
 This view is always available as an alternative to the workspace view.
 Good for understanding "what's happening under the hood" and exploring
 the semantic structure directly.
+
+Now includes moral geometry overlays - patterns in the virtue structure:
+- Triads (tightly coupled virtue clusters)
+- Bridges (virtues connecting different clusters)
+- Basin topology (attraction regions)
+- Resonance patterns (co-activating virtues)
 """
 
 import logging
@@ -111,6 +117,26 @@ class CameraState:
 
 
 @dataclass
+class GeometryOverlay:
+    """Moral geometry patterns to overlay on graph."""
+
+    triads: list[dict] = field(default_factory=list)  # Highlighted virtue triangles
+    bridges: list[dict] = field(default_factory=list)  # Bridge node indicators
+    basin_hints: list[dict] = field(default_factory=list)  # Basin size indicators
+    resonance_links: list[dict] = field(default_factory=list)  # Co-activation patterns
+    pattern_summary: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "triads": self.triads,
+            "bridges": self.bridges,
+            "basin_hints": self.basin_hints,
+            "resonance_links": self.resonance_links,
+            "pattern_summary": self.pattern_summary,
+        }
+
+
+@dataclass
 class GraphViewState:
     """Complete state for graph view rendering."""
 
@@ -119,6 +145,7 @@ class GraphViewState:
     camera: CameraState
     layout: GraphLayout
     hot_region: TopicRegion | None = None
+    geometry_overlay: GeometryOverlay | None = None
     timestamp: datetime = field(default_factory=datetime.utcnow)
 
     def to_dict(self) -> dict:
@@ -129,6 +156,7 @@ class GraphViewState:
             "camera": self.camera.to_dict(),
             "layout": self.layout.value,
             "hot_region": self.hot_region.value if self.hot_region else None,
+            "geometry": self.geometry_overlay.to_dict() if self.geometry_overlay else None,
             "timestamp": self.timestamp.isoformat(),
         }
 
@@ -164,6 +192,7 @@ class GraphViewRenderer:
         substrate=None,
         layout: GraphLayout = GraphLayout.FORCE_DIRECTED,
         activation_threshold: float = 0.1,
+        show_geometry: bool = True,
     ):
         """
         Initialize the graph view renderer.
@@ -172,15 +201,28 @@ class GraphViewRenderer:
             substrate: The graph substrate for node/edge access
             layout: Layout algorithm to use
             activation_threshold: Minimum activation to show node prominently
+            show_geometry: Whether to include moral geometry overlay
         """
         self._substrate = substrate
         self._layout = layout
         self._activation_threshold = activation_threshold
+        self._show_geometry = show_geometry
         self._camera = CameraState()
         self._last_state: GraphViewState | None = None
+        self._geometry_analyzer = None
 
         # Callbacks
         self._update_callbacks: list[Callable[[GraphViewState], None]] = []
+
+    def _get_geometry_analyzer(self):
+        """Lazy load geometry analyzer."""
+        if self._geometry_analyzer is None:
+            try:
+                from ..graph.moral_geometry import MoralGeometryAnalyzer
+                self._geometry_analyzer = MoralGeometryAnalyzer(self._substrate)
+            except ImportError:
+                logger.debug("Moral geometry analyzer not available")
+        return self._geometry_analyzer
 
     def set_substrate(self, substrate) -> None:
         """Set the graph substrate."""
@@ -218,18 +260,90 @@ class GraphViewRenderer:
         # Update camera to follow activation
         self._update_camera(nodes, topic_state)
 
+        # Build geometry overlay if enabled
+        geometry_overlay = None
+        if self._show_geometry:
+            geometry_overlay = self._build_geometry_overlay(topic_state)
+
         state = GraphViewState(
             nodes=nodes,
             edges=edges,
             camera=self._camera,
             layout=self._layout,
             hot_region=topic_state.primary_region if topic_state else None,
+            geometry_overlay=geometry_overlay,
         )
 
         self._last_state = state
         self._notify_update(state)
 
         return state
+
+    def _build_geometry_overlay(self, topic_state: TopicState | None) -> GeometryOverlay:
+        """Build moral geometry overlay for visualization."""
+        analyzer = self._get_geometry_analyzer()
+        if not analyzer:
+            return GeometryOverlay()
+
+        # Record activation for resonance analysis
+        if topic_state and self._substrate:
+            activation_map = {
+                n.id: n.activation for n in self._substrate.get_all_nodes()
+            }
+            analyzer.record_activation(activation_map)
+
+        # Analyze geometry
+        try:
+            geometry = analyzer.analyze()
+        except Exception as e:
+            logger.error(f"Geometry analysis failed: {e}")
+            return GeometryOverlay()
+
+        # Build overlay data
+        triads = []
+        for triad in geometry.triads[:5]:  # Top 5 triads
+            triads.append({
+                "virtues": triad.virtues,
+                "affinity": triad.total_affinity,
+                "color": "#FFD700" if triad.is_bridge_triad else "#90CAF9",
+                "highlight": triad.total_affinity > 1.3,
+            })
+
+        bridges = []
+        for bridge in geometry.bridges[:5]:  # Top 5 bridges
+            bridges.append({
+                "virtue_id": bridge.virtue_id,
+                "score": bridge.bridge_score,
+                "connects": bridge.clusters_connected,
+                "color": "#FF9800",
+            })
+
+        basin_hints = []
+        for vid, basin in geometry.basins.items():
+            basin_hints.append({
+                "virtue_id": vid,
+                "volume": basin.basin_volume,
+                "cluster": basin.cluster,
+                "radius_hint": min(50, basin.basin_volume * 20),
+            })
+
+        resonance_links = []
+        for pattern in geometry.resonance_patterns[:10]:
+            for resonant in pattern.resonant:
+                resonance_links.append({
+                    "source": pattern.primary,
+                    "target": resonant,
+                    "strength": pattern.correlation_matrix.get(resonant, 0.5),
+                    "type": pattern.pattern_type,
+                })
+
+        return GeometryOverlay(
+            triads=triads,
+            bridges=bridges,
+            basin_hints=basin_hints,
+            resonance_links=resonance_links,
+            pattern_summary=analyzer.get_pattern_summary(),
+        )
 
     def _node_to_visual(
         self, node, topic_state: TopicState | None

@@ -44,7 +44,7 @@ from .artifacts import (
     ArtifactType,
     ArtifactRequest,
 )
-from .graph_view import GraphViewRenderer, GraphViewState, GraphNode, GraphEdge
+from .graph_view import GraphViewRenderer, GraphViewState, GraphNode, GraphEdge, GeometryOverlay
 from .views import ViewManager, ViewType, ViewState, WorkspaceState
 from .integration import TheatreSystem, TheatreConfig, create_theatre
 
@@ -87,6 +87,7 @@ __all__ = [
     "GraphViewState",
     "GraphNode",
     "GraphEdge",
+    "GeometryOverlay",
     # View management
     "ViewManager",
     "ViewType",
