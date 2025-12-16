@@ -1,21 +1,26 @@
 """
-Artifact System.
+Artifact System - KB Query Driven.
 
-Manages contextual artifacts that surface in the workspace to serve understanding.
-Artifacts are retrieved, generated, or composed based on graph state and conversation needs.
+Surfaces contextual artifacts from the knowledge graph to serve understanding.
+Artifacts are retrieved based on what's being discussed - the active concepts
+in the graph determine what's relevant.
 
-Artifacts are utilitarian - they enhance information value, not ambiance.
-Examples:
-- A document under review (retrieved)
-- An image highlighting an aspect of a concept (retrieved or generated)
-- A timeline showing process stages (composed)
-- A checklist with status indicators (composed)
-- A comparison of options (composed)
+The key insight: artifacts are nodes in the KB, linked to concepts via
+typed edges. When concepts activate, we query for linked artifacts.
+
+Edge types for artifacts:
+- DEPICTED_BY: concept -> image (visual representation)
+- HAS_DOCUMENT: concept -> document (related documentation)
+- HAS_SECTION: document -> section (specific part of doc)
+- LOCATED_AT: resource -> location (spatial context)
+- ILLUSTRATED_BY: concept -> diagram (explanatory visual)
+- EXEMPLIFIED_BY: concept -> example (concrete instance)
+
+Artifacts serve communication - they make the conversation more effective.
 """
 
 import logging
 import uuid
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -26,370 +31,483 @@ from .topic_detector import TopicState
 logger = logging.getLogger(__name__)
 
 
+# Edge types that link concepts to artifacts
+class ArtifactEdge(str, Enum):
+    """Edge types that connect concepts to artifacts in the KB."""
+
+    DEPICTED_BY = "DEPICTED_BY"  # Visual representation
+    HAS_DOCUMENT = "HAS_DOCUMENT"  # Related document
+    HAS_SECTION = "HAS_SECTION"  # Document section
+    LOCATED_AT = "LOCATED_AT"  # Spatial location
+    ILLUSTRATED_BY = "ILLUSTRATED_BY"  # Diagram/illustration
+    EXEMPLIFIED_BY = "EXEMPLIFIED_BY"  # Concrete example
+    HAS_REFERENCE = "HAS_REFERENCE"  # Citation/source
+    HAS_TIMELINE = "HAS_TIMELINE"  # Process timeline
+    HAS_CHECKLIST = "HAS_CHECKLIST"  # Task checklist
+    COMPARED_WITH = "COMPARED_WITH"  # Comparison target
+
+
 class ArtifactType(str, Enum):
     """Types of artifacts that can be surfaced."""
 
-    # Retrieved
-    DOCUMENT = "document"  # Actual document being discussed
-    IMAGE = "image"  # Reference image, photo, illustration
-    REFERENCE = "reference"  # Link, citation, source material
+    # Media (retrieved from KB or external)
+    IMAGE = "image"
+    DOCUMENT = "document"
+    DOCUMENT_SECTION = "document_section"
+    MAP = "map"
+    DIAGRAM = "diagram"
 
-    # Generated
-    ILLUSTRATION = "illustration"  # Generated image to explain concept
-    DIAGRAM = "diagram"  # Generated diagram showing relationships
+    # Structured (composed from KB data)
+    TIMELINE = "timeline"
+    CHECKLIST = "checklist"
+    COMPARISON = "comparison"
+    EXAMPLE = "example"
 
-    # Composed from data
-    TIMELINE = "timeline"  # Process stages, deadlines
-    CHECKLIST = "checklist"  # Items with status
-    COMPARISON = "comparison"  # Side-by-side options
-    PROGRESS = "progress"  # Progress indicator
-    CONCEPT_MAP = "concept_map"  # Subset of graph relevant to current topic
+    # Reference
+    REFERENCE = "reference"
+    LINK = "link"
 
 
 class ArtifactSource(str, Enum):
     """How the artifact was obtained."""
 
-    RETRIEVED = "retrieved"  # Found in memory/storage
-    GENERATED = "generated"  # Created via generation (image gen, etc.)
+    KB_RETRIEVED = "kb_retrieved"  # Found in knowledge graph
+    EXTERNAL = "external"  # Retrieved from external source
+    GENERATED = "generated"  # Created via generation
     COMPOSED = "composed"  # Built from structured data
 
 
 @dataclass
+class ArtifactNode:
+    """An artifact as stored in the knowledge graph."""
+
+    id: str
+    type: ArtifactType
+    content_ref: str  # URL, path, or inline content
+    title: str
+    metadata: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "type": self.type.value,
+            "content_ref": self.content_ref,
+            "title": self.title,
+            "metadata": self.metadata,
+        }
+
+
+@dataclass
 class Artifact:
-    """A contextual artifact surfaced in the workspace."""
+    """A surfaced artifact ready for display."""
 
     id: str
     type: ArtifactType
     source: ArtifactSource
     title: str
-    content: Any  # Type depends on artifact type
-    relevance: float = 1.0  # 0-1, how relevant to current context
+    content: Any  # Resolved content (URL, text, structured data)
+    relevance: float = 1.0  # Based on activation + edge weight
+    linked_concepts: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.utcnow)
-    expires_at: datetime | None = None  # When to auto-dismiss
+    expires_at: datetime | None = None
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for rendering."""
         return {
             "id": self.id,
             "type": self.type.value,
             "source": self.source.value,
             "title": self.title,
-            "content": self._serialize_content(),
+            "content": self.content,
             "relevance": self.relevance,
+            "linked_concepts": self.linked_concepts,
             "metadata": self.metadata,
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
         }
 
-    def _serialize_content(self) -> Any:
-        """Serialize content based on type."""
-        if self.type == ArtifactType.IMAGE:
-            # Content is URL or base64
-            return self.content
-        elif self.type == ArtifactType.DOCUMENT:
-            # Content is text or structured doc
-            return self.content
-        elif self.type in (ArtifactType.TIMELINE, ArtifactType.CHECKLIST):
-            # Content is list of items
-            return self.content
-        elif self.type == ArtifactType.COMPARISON:
-            # Content is dict of options
-            return self.content
-        elif self.type == ArtifactType.CONCEPT_MAP:
-            # Content is graph subset
-            return self.content
-        else:
-            return str(self.content)
-
 
 @dataclass
-class ArtifactRequest:
-    """Request for an artifact based on context."""
+class ArtifactQuery:
+    """Query for artifacts based on active concepts."""
 
-    context: str  # What we're trying to show/explain
-    type_hint: ArtifactType | None = None  # Preferred type if any
-    topic_state: TopicState | None = None
-    concepts: list[str] = field(default_factory=list)
-    urgency: float = 0.5  # 0-1, how important to surface now
-
-
-class ArtifactProvider(ABC):
-    """Base class for artifact providers."""
-
-    @abstractmethod
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        """Check if this provider can fulfill the request."""
-        pass
-
-    @abstractmethod
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        """Provide an artifact for the request."""
-        pass
+    concepts: list[str]  # Active concept IDs
+    activations: dict[str, float] = field(default_factory=dict)  # concept -> activation
+    type_filter: list[ArtifactType] | None = None  # Only these types
+    edge_filter: list[ArtifactEdge] | None = None  # Only via these edges
+    limit: int = 5  # Max artifacts to return
+    min_relevance: float = 0.3  # Minimum relevance threshold
 
 
-class DocumentProvider(ArtifactProvider):
-    """Provides document artifacts from storage."""
+class KBArtifactRetriever:
+    """
+    Retrieves artifacts from the knowledge graph based on active concepts.
 
-    def __init__(self, document_store: dict[str, Any] | None = None):
-        self._store = document_store or {}
+    The KB contains artifact nodes linked to concept nodes via typed edges.
+    When concepts activate, we find linked artifacts and rank by relevance.
+    """
 
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        if request.type_hint and request.type_hint != ArtifactType.DOCUMENT:
-            return False
-        # Check if we have relevant documents
-        return any(
-            concept.lower() in doc_id.lower()
-            for concept in request.concepts
-            for doc_id in self._store.keys()
-        )
+    # Map edge types to artifact types
+    EDGE_TO_TYPE = {
+        ArtifactEdge.DEPICTED_BY: ArtifactType.IMAGE,
+        ArtifactEdge.HAS_DOCUMENT: ArtifactType.DOCUMENT,
+        ArtifactEdge.HAS_SECTION: ArtifactType.DOCUMENT_SECTION,
+        ArtifactEdge.LOCATED_AT: ArtifactType.MAP,
+        ArtifactEdge.ILLUSTRATED_BY: ArtifactType.DIAGRAM,
+        ArtifactEdge.EXEMPLIFIED_BY: ArtifactType.EXAMPLE,
+        ArtifactEdge.HAS_REFERENCE: ArtifactType.REFERENCE,
+        ArtifactEdge.HAS_TIMELINE: ArtifactType.TIMELINE,
+        ArtifactEdge.HAS_CHECKLIST: ArtifactType.CHECKLIST,
+    }
 
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        # Find most relevant document
-        for concept in request.concepts:
-            for doc_id, doc_content in self._store.items():
-                if concept.lower() in doc_id.lower():
-                    return Artifact(
-                        id=f"doc_{uuid.uuid4().hex[:8]}",
-                        type=ArtifactType.DOCUMENT,
-                        source=ArtifactSource.RETRIEVED,
-                        title=doc_id,
-                        content=doc_content,
-                        metadata={"matched_concept": concept},
-                    )
-        return None
+    def __init__(self, substrate=None, graph_client=None):
+        """
+        Initialize the retriever.
 
-    def add_document(self, doc_id: str, content: Any) -> None:
-        """Add a document to the store."""
-        self._store[doc_id] = content
+        Args:
+            substrate: The GraphSubstrate for node access
+            graph_client: Direct graph client for queries
+        """
+        self._substrate = substrate
+        self._client = graph_client
 
+    def set_substrate(self, substrate) -> None:
+        """Set the graph substrate."""
+        self._substrate = substrate
 
-class ImageProvider(ArtifactProvider):
-    """Provides image artifacts - retrieved or generated."""
+    def set_client(self, client) -> None:
+        """Set the graph client."""
+        self._client = client
 
-    def __init__(
-        self,
-        image_store: dict[str, str] | None = None,
-        generator_fn: Callable[[str], str] | None = None,
-    ):
-        self._store = image_store or {}
-        self._generator = generator_fn  # Returns URL or base64
+    def query(self, query: ArtifactQuery) -> list[Artifact]:
+        """
+        Query for artifacts linked to active concepts.
 
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        if request.type_hint and request.type_hint not in (
-            ArtifactType.IMAGE,
-            ArtifactType.ILLUSTRATION,
-        ):
-            return False
-        # Can always try to generate if we have a generator
-        return bool(self._store) or bool(self._generator)
+        Args:
+            query: The artifact query with concepts and filters
 
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        # Try retrieval first
-        for concept in request.concepts:
-            for img_id, img_url in self._store.items():
-                if concept.lower() in img_id.lower():
-                    return Artifact(
-                        id=f"img_{uuid.uuid4().hex[:8]}",
-                        type=ArtifactType.IMAGE,
-                        source=ArtifactSource.RETRIEVED,
-                        title=img_id,
-                        content=img_url,
-                        metadata={"matched_concept": concept},
-                    )
+        Returns:
+            List of artifacts sorted by relevance
+        """
+        if not query.concepts:
+            return []
 
-        # Fall back to generation
-        if self._generator and request.context:
+        candidates: list[tuple[Artifact, float]] = []
+
+        # Query via graph client if available
+        if self._client:
+            candidates = self._query_via_client(query)
+        # Fall back to substrate traversal
+        elif self._substrate:
+            candidates = self._query_via_substrate(query)
+
+        # Sort by relevance and limit
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        results = [
+            artifact
+            for artifact, relevance in candidates[:query.limit]
+            if relevance >= query.min_relevance
+        ]
+
+        return results
+
+    def _query_via_client(self, query: ArtifactQuery) -> list[tuple[Artifact, float]]:
+        """Query using graph client (Cypher queries)."""
+        candidates = []
+
+        # Build edge type filter
+        edge_types = query.edge_filter or list(ArtifactEdge)
+        edge_type_str = "|".join(e.value for e in edge_types)
+
+        # Query for artifacts linked to any active concept
+        for concept_id in query.concepts:
+            activation = query.activations.get(concept_id, 0.5)
+
             try:
-                generated_url = self._generator(request.context)
-                return Artifact(
-                    id=f"img_{uuid.uuid4().hex[:8]}",
-                    type=ArtifactType.ILLUSTRATION,
-                    source=ArtifactSource.GENERATED,
-                    title=f"Illustration: {request.context[:50]}",
-                    content=generated_url,
-                    metadata={"prompt": request.context},
+                # Query pattern: (concept)-[edge]->(artifact)
+                result = self._client.query(
+                    f"""
+                    MATCH (c {{id: $concept_id}})-[r:{edge_type_str}]->(a:Artifact)
+                    RETURN a.id, a.type, a.content_ref, a.title, a.metadata,
+                           type(r) as edge_type, r.weight as weight
+                    """,
+                    {"concept_id": concept_id}
                 )
+
+                for row in result:
+                    artifact_id, artifact_type, content_ref, title, metadata, edge_type, weight = row
+                    weight = weight or 0.5
+
+                    # Apply type filter
+                    try:
+                        atype = ArtifactType(artifact_type)
+                    except ValueError:
+                        continue
+
+                    if query.type_filter and atype not in query.type_filter:
+                        continue
+
+                    # Compute relevance: activation * edge_weight
+                    relevance = activation * weight
+
+                    artifact = Artifact(
+                        id=artifact_id,
+                        type=atype,
+                        source=ArtifactSource.KB_RETRIEVED,
+                        title=title or artifact_id,
+                        content=content_ref,
+                        relevance=relevance,
+                        linked_concepts=[concept_id],
+                        metadata=metadata or {},
+                    )
+                    candidates.append((artifact, relevance))
+
             except Exception as e:
-                logger.error(f"Image generation failed: {e}")
+                logger.debug(f"Artifact query failed for {concept_id}: {e}")
 
-        return None
+        # Deduplicate by artifact ID, keeping highest relevance
+        seen: dict[str, tuple[Artifact, float]] = {}
+        for artifact, relevance in candidates:
+            if artifact.id not in seen or seen[artifact.id][1] < relevance:
+                seen[artifact.id] = (artifact, relevance)
 
-    def add_image(self, img_id: str, url: str) -> None:
-        """Add an image to the store."""
-        self._store[img_id] = url
+        return list(seen.values())
 
+    def _query_via_substrate(self, query: ArtifactQuery) -> list[tuple[Artifact, float]]:
+        """Query using substrate traversal."""
+        candidates = []
 
-class TimelineProvider(ArtifactProvider):
-    """Composes timeline artifacts from structured data."""
+        for concept_id in query.concepts:
+            activation = query.activations.get(concept_id, 0.5)
 
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        return request.type_hint == ArtifactType.TIMELINE
+            try:
+                # Get outgoing edges from concept
+                edges = self._substrate.get_edges_from(concept_id)
 
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        # Would typically query for timeline data based on context
-        # For now, return None - needs data source
-        return None
+                for edge in edges:
+                    # Check if edge type is an artifact edge
+                    try:
+                        edge_type = ArtifactEdge(edge.edge_type)
+                    except ValueError:
+                        continue
 
-    def compose(
-        self,
-        title: str,
-        stages: list[dict[str, Any]],
-        current_stage: int | None = None,
-    ) -> Artifact:
-        """Compose a timeline artifact from stage data."""
-        return Artifact(
-            id=f"timeline_{uuid.uuid4().hex[:8]}",
-            type=ArtifactType.TIMELINE,
-            source=ArtifactSource.COMPOSED,
-            title=title,
-            content={
-                "stages": stages,
-                "current_stage": current_stage,
-            },
-        )
+                    if query.edge_filter and edge_type not in query.edge_filter:
+                        continue
 
+                    # Get target node (artifact)
+                    target = self._substrate.get_node(edge.target_id)
+                    if not target:
+                        continue
 
-class ChecklistProvider(ArtifactProvider):
-    """Composes checklist artifacts from structured data."""
+                    # Infer artifact type from edge
+                    atype = self.EDGE_TO_TYPE.get(edge_type, ArtifactType.REFERENCE)
 
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        return request.type_hint == ArtifactType.CHECKLIST
+                    if query.type_filter and atype not in query.type_filter:
+                        continue
 
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        return None
+                    # Compute relevance
+                    relevance = activation * edge.weight
 
-    def compose(
-        self,
-        title: str,
-        items: list[dict[str, Any]],
-    ) -> Artifact:
-        """
-        Compose a checklist artifact.
+                    artifact = Artifact(
+                        id=target.id,
+                        type=atype,
+                        source=ArtifactSource.KB_RETRIEVED,
+                        title=target.metadata.get("title", target.id),
+                        content=target.metadata.get("content_ref", ""),
+                        relevance=relevance,
+                        linked_concepts=[concept_id],
+                        metadata=target.metadata,
+                    )
+                    candidates.append((artifact, relevance))
 
-        Items should have: {text: str, checked: bool, status?: str}
-        """
-        return Artifact(
-            id=f"checklist_{uuid.uuid4().hex[:8]}",
-            type=ArtifactType.CHECKLIST,
-            source=ArtifactSource.COMPOSED,
-            title=title,
-            content={"items": items},
-        )
+            except Exception as e:
+                logger.debug(f"Substrate query failed for {concept_id}: {e}")
+
+        return candidates
 
 
-class ComparisonProvider(ArtifactProvider):
-    """Composes comparison artifacts for side-by-side views."""
+class ArtifactComposer:
+    """
+    Composes structured artifacts from KB data.
 
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        return request.type_hint == ArtifactType.COMPARISON
-
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        return None
-
-    def compose(
-        self,
-        title: str,
-        options: list[dict[str, Any]],
-        criteria: list[str] | None = None,
-    ) -> Artifact:
-        """
-        Compose a comparison artifact.
-
-        Options should have: {name: str, values: dict[criterion, value]}
-        """
-        return Artifact(
-            id=f"comparison_{uuid.uuid4().hex[:8]}",
-            type=ArtifactType.COMPARISON,
-            source=ArtifactSource.COMPOSED,
-            title=title,
-            content={
-                "options": options,
-                "criteria": criteria or [],
-            },
-        )
-
-
-class ConceptMapProvider(ArtifactProvider):
-    """Extracts relevant subgraph as concept map artifact."""
+    Some artifacts are composed from multiple KB nodes rather than
+    retrieved as single nodes (e.g., timelines, comparisons).
+    """
 
     def __init__(self, substrate=None):
         self._substrate = substrate
 
-    def can_provide(self, request: ArtifactRequest) -> bool:
-        return (
-            request.type_hint == ArtifactType.CONCEPT_MAP
-            and self._substrate is not None
-        )
+    def set_substrate(self, substrate) -> None:
+        self._substrate = substrate
 
-    def provide(self, request: ArtifactRequest) -> Artifact | None:
-        if not self._substrate or not request.concepts:
-            return None
+    def compose_timeline(
+        self,
+        concept_id: str,
+        title: str | None = None,
+    ) -> Artifact | None:
+        """
+        Compose a timeline from HAS_TIMELINE edges.
 
-        # Extract subgraph around the specified concepts
-        subgraph = self._extract_subgraph(request.concepts)
-        if subgraph:
-            return Artifact(
-                id=f"conceptmap_{uuid.uuid4().hex[:8]}",
-                type=ArtifactType.CONCEPT_MAP,
-                source=ArtifactSource.COMPOSED,
-                title="Concept Map",
-                content=subgraph,
-            )
-        return None
-
-    def _extract_subgraph(self, concept_ids: list[str], depth: int = 2) -> dict | None:
-        """Extract a subgraph around the given concepts."""
+        Expects timeline nodes to have: stage, order, status, description
+        """
         if not self._substrate:
             return None
 
-        nodes = []
-        edges = []
-        visited = set()
+        try:
+            edges = self._substrate.get_edges_from(concept_id)
+            timeline_edges = [
+                e for e in edges
+                if e.edge_type == ArtifactEdge.HAS_TIMELINE.value
+            ]
 
-        def traverse(node_id: str, current_depth: int):
-            if node_id in visited or current_depth > depth:
-                return
-            visited.add(node_id)
+            if not timeline_edges:
+                return None
 
-            node = self._substrate.get_node(node_id)
-            if node:
-                nodes.append({
-                    "id": node.id,
-                    "type": node.type.value,
-                    "activation": node.activation,
-                    "label": node.metadata.get("name", node.id),
-                })
+            stages = []
+            for edge in timeline_edges:
+                node = self._substrate.get_node(edge.target_id)
+                if node:
+                    stages.append({
+                        "name": node.metadata.get("stage", node.id),
+                        "order": node.metadata.get("order", 0),
+                        "status": node.metadata.get("status", "pending"),
+                        "description": node.metadata.get("description", ""),
+                    })
 
-                # Get edges
-                if current_depth < depth:
-                    for edge in self._substrate.get_edges_from(node_id):
-                        edges.append({
-                            "source": edge.source_id,
-                            "target": edge.target_id,
-                            "weight": edge.weight,
-                        })
-                        traverse(edge.target_id, current_depth + 1)
+            stages.sort(key=lambda x: x["order"])
+            current = next(
+                (i for i, s in enumerate(stages) if s["status"] == "current"),
+                None
+            )
 
-        for concept_id in concept_ids:
-            traverse(concept_id, 0)
+            return Artifact(
+                id=f"timeline_{uuid.uuid4().hex[:8]}",
+                type=ArtifactType.TIMELINE,
+                source=ArtifactSource.COMPOSED,
+                title=title or f"Timeline: {concept_id}",
+                content={"stages": stages, "current_stage": current},
+                linked_concepts=[concept_id],
+            )
 
-        if not nodes:
+        except Exception as e:
+            logger.error(f"Timeline composition failed: {e}")
             return None
 
-        return {"nodes": nodes, "edges": edges}
+    def compose_checklist(
+        self,
+        concept_id: str,
+        title: str | None = None,
+    ) -> Artifact | None:
+        """
+        Compose a checklist from HAS_CHECKLIST edges.
+
+        Expects checklist item nodes to have: text, checked, priority
+        """
+        if not self._substrate:
+            return None
+
+        try:
+            edges = self._substrate.get_edges_from(concept_id)
+            checklist_edges = [
+                e for e in edges
+                if e.edge_type == ArtifactEdge.HAS_CHECKLIST.value
+            ]
+
+            if not checklist_edges:
+                return None
+
+            items = []
+            for edge in checklist_edges:
+                node = self._substrate.get_node(edge.target_id)
+                if node:
+                    items.append({
+                        "text": node.metadata.get("text", node.id),
+                        "checked": node.metadata.get("checked", False),
+                        "priority": node.metadata.get("priority", 0),
+                    })
+
+            items.sort(key=lambda x: -x["priority"])
+
+            return Artifact(
+                id=f"checklist_{uuid.uuid4().hex[:8]}",
+                type=ArtifactType.CHECKLIST,
+                source=ArtifactSource.COMPOSED,
+                title=title or f"Checklist: {concept_id}",
+                content={"items": items},
+                linked_concepts=[concept_id],
+            )
+
+        except Exception as e:
+            logger.error(f"Checklist composition failed: {e}")
+            return None
+
+    def compose_comparison(
+        self,
+        concept_ids: list[str],
+        criteria: list[str] | None = None,
+        title: str | None = None,
+    ) -> Artifact | None:
+        """
+        Compose a comparison from multiple concepts.
+
+        Compares concepts across specified criteria from their metadata.
+        """
+        if not self._substrate or len(concept_ids) < 2:
+            return None
+
+        try:
+            options = []
+            all_criteria = set(criteria) if criteria else set()
+
+            for concept_id in concept_ids:
+                node = self._substrate.get_node(concept_id)
+                if node:
+                    option = {
+                        "id": concept_id,
+                        "name": node.metadata.get("name", concept_id),
+                        "values": {},
+                    }
+
+                    # Extract comparable values from metadata
+                    for key, value in node.metadata.items():
+                        if isinstance(value, (str, int, float, bool)):
+                            option["values"][key] = value
+                            if not criteria:
+                                all_criteria.add(key)
+
+                    options.append(option)
+
+            if len(options) < 2:
+                return None
+
+            return Artifact(
+                id=f"comparison_{uuid.uuid4().hex[:8]}",
+                type=ArtifactType.COMPARISON,
+                source=ArtifactSource.COMPOSED,
+                title=title or "Comparison",
+                content={
+                    "options": options,
+                    "criteria": list(all_criteria),
+                },
+                linked_concepts=concept_ids,
+            )
+
+        except Exception as e:
+            logger.error(f"Comparison composition failed: {e}")
+            return None
 
 
 class ArtifactCurator:
     """
-    Decides what artifacts to surface based on graph state and conversation.
+    Decides what artifacts to surface based on conversation state.
 
-    The curator is like a research assistant who finds/creates the right
-    visual aid for the current moment.
+    Queries the KB for artifacts linked to active concepts,
+    and composes structured artifacts when appropriate.
     """
 
-    def __init__(self):
-        self._providers: list[ArtifactProvider] = []
+    def __init__(self, substrate=None, graph_client=None):
+        self._retriever = KBArtifactRetriever(substrate, graph_client)
+        self._composer = ArtifactComposer(substrate)
         self._active_artifacts: dict[str, Artifact] = {}
         self._history: list[Artifact] = []
 
@@ -397,106 +515,206 @@ class ArtifactCurator:
         self._surface_callbacks: list[Callable[[Artifact], None]] = []
         self._dismiss_callbacks: list[Callable[[str], None]] = []
 
-        # Initialize default providers
-        self._document_provider = DocumentProvider()
-        self._image_provider = ImageProvider()
-        self._timeline_provider = TimelineProvider()
-        self._checklist_provider = ChecklistProvider()
-        self._comparison_provider = ComparisonProvider()
-        self._concept_map_provider = ConceptMapProvider()
-
-        self._providers = [
-            self._document_provider,
-            self._image_provider,
-            self._timeline_provider,
-            self._checklist_provider,
-            self._comparison_provider,
-            self._concept_map_provider,
-        ]
+        # Generation function for when KB has no artifact
+        self._image_generator: Callable[[str, list[str]], str] | None = None
 
     def set_substrate(self, substrate) -> None:
-        """Set the graph substrate for concept map extraction."""
-        self._concept_map_provider._substrate = substrate
+        """Set the graph substrate."""
+        self._retriever.set_substrate(substrate)
+        self._composer.set_substrate(substrate)
 
-    def set_image_generator(self, generator_fn: Callable[[str], str]) -> None:
-        """Set the image generation function."""
-        self._image_provider._generator = generator_fn
+    def set_client(self, client) -> None:
+        """Set the graph client."""
+        self._retriever.set_client(client)
 
-    def request_artifact(self, request: ArtifactRequest) -> Artifact | None:
+    def set_image_generator(
+        self,
+        generator_fn: Callable[[str, list[str]], str]
+    ) -> None:
         """
-        Request an artifact based on context.
+        Set image generation function.
 
-        Tries providers in order until one can fulfill the request.
+        Args:
+            generator_fn: Takes (prompt, concept_ids) -> image_url
         """
-        for provider in self._providers:
-            if provider.can_provide(request):
-                artifact = provider.provide(request)
-                if artifact:
-                    self._surface_artifact(artifact)
-                    return artifact
-        return None
+        self._image_generator = generator_fn
 
-    def surface_from_topic(self, topic_state: TopicState) -> list[Artifact]:
+    def surface_for_topic(self, topic_state: TopicState) -> list[Artifact]:
         """
-        Automatically surface relevant artifacts based on topic state.
+        Surface relevant artifacts for the current topic state.
 
-        Called when topic changes significantly.
+        This is the main entry point - called when topic detection
+        identifies active concepts.
         """
-        artifacts = []
+        if not topic_state.active_concepts:
+            return []
 
-        # Request concept map for active concepts
-        if topic_state.active_concepts:
-            request = ArtifactRequest(
-                context="Current topic concepts",
-                type_hint=ArtifactType.CONCEPT_MAP,
-                topic_state=topic_state,
-                concepts=topic_state.active_concepts[:5],
+        # Build activation map
+        activations = {}
+        for concept_id in topic_state.active_concepts:
+            # Estimate activation from position in list
+            activations[concept_id] = 1.0 - (
+                topic_state.active_concepts.index(concept_id) * 0.1
             )
-            artifact = self.request_artifact(request)
-            if artifact:
-                artifacts.append(artifact)
+
+        # Query for artifacts
+        query = ArtifactQuery(
+            concepts=topic_state.active_concepts,
+            activations=activations,
+            limit=3,  # Don't overwhelm
+            min_relevance=0.3,
+        )
+
+        artifacts = self._retriever.query(query)
+
+        # Surface each artifact
+        for artifact in artifacts:
+            self._surface_artifact(artifact)
 
         return artifacts
 
-    def compose_timeline(
+    def request_artifact(
         self,
-        title: str,
-        stages: list[dict[str, Any]],
-        current_stage: int | None = None,
-    ) -> Artifact:
-        """Directly compose and surface a timeline."""
-        artifact = self._timeline_provider.compose(title, stages, current_stage)
-        self._surface_artifact(artifact)
+        concepts: list[str],
+        artifact_type: ArtifactType | None = None,
+        context: str | None = None,
+    ) -> Artifact | None:
+        """
+        Explicitly request an artifact for given concepts.
+
+        Args:
+            concepts: Concept IDs to find artifacts for
+            artifact_type: Preferred type (optional)
+            context: Context string for generation fallback
+
+        Returns:
+            Retrieved or generated artifact
+        """
+        query = ArtifactQuery(
+            concepts=concepts,
+            type_filter=[artifact_type] if artifact_type else None,
+            limit=1,
+        )
+
+        results = self._retriever.query(query)
+
+        if results:
+            artifact = results[0]
+            self._surface_artifact(artifact)
+            return artifact
+
+        # Fall back to generation for images
+        if (
+            artifact_type == ArtifactType.IMAGE
+            and self._image_generator
+            and context
+        ):
+            try:
+                image_url = self._image_generator(context, concepts)
+                artifact = Artifact(
+                    id=f"gen_img_{uuid.uuid4().hex[:8]}",
+                    type=ArtifactType.IMAGE,
+                    source=ArtifactSource.GENERATED,
+                    title=f"Generated: {context[:30]}",
+                    content=image_url,
+                    linked_concepts=concepts,
+                    metadata={"prompt": context},
+                )
+                self._surface_artifact(artifact)
+                return artifact
+            except Exception as e:
+                logger.error(f"Image generation failed: {e}")
+
+        return None
+
+    def request_timeline(
+        self,
+        concept_id: str,
+        title: str | None = None,
+    ) -> Artifact | None:
+        """Request a timeline artifact for a concept."""
+        artifact = self._composer.compose_timeline(concept_id, title)
+        if artifact:
+            self._surface_artifact(artifact)
         return artifact
 
-    def compose_checklist(
+    def request_checklist(
         self,
-        title: str,
-        items: list[dict[str, Any]],
-    ) -> Artifact:
-        """Directly compose and surface a checklist."""
-        artifact = self._checklist_provider.compose(title, items)
-        self._surface_artifact(artifact)
+        concept_id: str,
+        title: str | None = None,
+    ) -> Artifact | None:
+        """Request a checklist artifact for a concept."""
+        artifact = self._composer.compose_checklist(concept_id, title)
+        if artifact:
+            self._surface_artifact(artifact)
         return artifact
 
-    def compose_comparison(
+    def request_comparison(
         self,
-        title: str,
-        options: list[dict[str, Any]],
+        concept_ids: list[str],
         criteria: list[str] | None = None,
-    ) -> Artifact:
-        """Directly compose and surface a comparison."""
-        artifact = self._comparison_provider.compose(title, options, criteria)
-        self._surface_artifact(artifact)
+        title: str | None = None,
+    ) -> Artifact | None:
+        """Request a comparison artifact between concepts."""
+        artifact = self._composer.compose_comparison(concept_ids, criteria, title)
+        if artifact:
+            self._surface_artifact(artifact)
         return artifact
 
-    def add_document(self, doc_id: str, content: Any) -> None:
-        """Add a document to the retrieval store."""
-        self._document_provider.add_document(doc_id, content)
+    def request_map(
+        self,
+        concept_id: str,
+    ) -> Artifact | None:
+        """Request a map artifact for a concept with location."""
+        query = ArtifactQuery(
+            concepts=[concept_id],
+            edge_filter=[ArtifactEdge.LOCATED_AT],
+            type_filter=[ArtifactType.MAP],
+            limit=1,
+        )
+        results = self._retriever.query(query)
+        if results:
+            self._surface_artifact(results[0])
+            return results[0]
+        return None
 
-    def add_image(self, img_id: str, url: str) -> None:
-        """Add an image to the retrieval store."""
-        self._image_provider.add_image(img_id, url)
+    def request_document_section(
+        self,
+        document_id: str,
+        section_hint: str | None = None,
+    ) -> Artifact | None:
+        """Request a specific section of a document."""
+        query = ArtifactQuery(
+            concepts=[document_id],
+            edge_filter=[ArtifactEdge.HAS_SECTION],
+            type_filter=[ArtifactType.DOCUMENT_SECTION],
+            limit=5,
+        )
+        results = self._retriever.query(query)
+
+        if not results:
+            return None
+
+        # If section hint provided, find best match
+        if section_hint and len(results) > 1:
+            section_hint_lower = section_hint.lower()
+            best = max(
+                results,
+                key=lambda a: (
+                    1.0 if section_hint_lower in a.title.lower()
+                    else 0.5 if any(
+                        section_hint_lower in str(v).lower()
+                        for v in a.metadata.values()
+                    )
+                    else 0.0
+                )
+            )
+            self._surface_artifact(best)
+            return best
+
+        # Return first result
+        self._surface_artifact(results[0])
+        return results[0]
 
     def _surface_artifact(self, artifact: Artifact) -> None:
         """Surface an artifact in the workspace."""

@@ -40,9 +40,14 @@ from .captions import CaptionRenderer, Caption, CaptionStyle, CaptionPosition
 from .hume_integration import HumeIntegration, EmotionalState, EmotionCategory
 from .artifacts import (
     ArtifactCurator,
+    ArtifactComposer,
+    KBArtifactRetriever,
     Artifact,
     ArtifactType,
-    ArtifactRequest,
+    ArtifactSource,
+    ArtifactEdge,
+    ArtifactQuery,
+    get_artifact_curator,
 )
 from .graph_view import GraphViewRenderer, GraphViewState, GraphNode, GraphEdge, GeometryOverlay
 from .views import ViewManager, ViewType, ViewState, WorkspaceState
@@ -77,11 +82,16 @@ __all__ = [
     "HumeIntegration",
     "EmotionalState",
     "EmotionCategory",
-    # Artifacts
+    # Artifacts (KB-query-driven)
     "ArtifactCurator",
+    "ArtifactComposer",
+    "KBArtifactRetriever",
     "Artifact",
     "ArtifactType",
-    "ArtifactRequest",
+    "ArtifactSource",
+    "ArtifactEdge",
+    "ArtifactQuery",
+    "get_artifact_curator",
     # Graph view
     "GraphViewRenderer",
     "GraphViewState",
