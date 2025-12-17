@@ -15,6 +15,14 @@ The core flow:
 4. Proxy joins a Community
 5. Community members share everything (lessons, patterns, pathways)
 6. All behavior navigates virtue basins toward emergent good
+
+Biomimicry principles guide seed development:
+- Potency: Seeds have developmental potential that narrows as identity forms
+- Differentiation: Virtue activations and conversations push toward types
+- Niches: Communities shape what seeds can become
+- Quorum: Collective patterns emerge when enough members hold them
+- Metamorphosis: Major identity shifts require dissolution and reformation
+- Symbiogenesis: Entities can fuse into more complex forms
 """
 
 from .entity import Entity, EntityType
@@ -32,6 +40,25 @@ from .seeding import (
     seed_curious_entity,
     list_seed_templates,
     SEED_TEMPLATES,
+)
+from .biomimicry import (
+    Potency,
+    LifeStage,
+    DifferentiationSignal,
+    DifferentiationPressure,
+    CommunityNiche,
+    QuorumState,
+    ChrysalisState,
+    MetamorphosisPhase,
+    FusionProposal,
+    DevelopmentalState,
+    VIRTUE_TYPE_ASSOCIATIONS,
+    ENTITY_CATEGORIES,
+)
+from .development import (
+    DevelopmentalManager,
+    get_dev_manager,
+    TOPIC_TYPE_ASSOCIATIONS,
 )
 
 __all__ = [
@@ -67,4 +94,21 @@ __all__ = [
     "seed_curious_entity",
     "list_seed_templates",
     "SEED_TEMPLATES",
+    # Biomimicry
+    "Potency",
+    "LifeStage",
+    "DifferentiationSignal",
+    "DifferentiationPressure",
+    "CommunityNiche",
+    "QuorumState",
+    "ChrysalisState",
+    "MetamorphosisPhase",
+    "FusionProposal",
+    "DevelopmentalState",
+    "VIRTUE_TYPE_ASSOCIATIONS",
+    "ENTITY_CATEGORIES",
+    # Development
+    "DevelopmentalManager",
+    "get_dev_manager",
+    "TOPIC_TYPE_ASSOCIATIONS",
 ]

@@ -1532,3 +1532,546 @@ def seed_community(community_name, templates):
 
     click.echo(f"Community {community_name} now has {comm.member_count + len(results)} members.")
     click.echo("These seeds will discover themselves through conversation.")
+
+
+# ============================================================================
+# DEVELOPMENTAL COMMANDS - Biomimicry-based seed development
+# ============================================================================
+
+
+@cli.command()
+@click.argument("entity_id")
+def develop(entity_id):
+    """Inspect the developmental state of an entity.
+
+    Shows potency level, life stage, differentiation pressures,
+    and signals pushing the entity toward specific types.
+    """
+    from ..core.development import get_dev_manager
+    from ..core.graph_store import get_core_store
+    from ..core.biomimicry import Potency, LifeStage
+
+    store = get_core_store()
+    entity = store.get_entity(entity_id)
+
+    if not entity:
+        click.echo(f"Entity not found: {entity_id}")
+        return
+
+    manager = get_dev_manager()
+    state = manager.get_state(entity_id)
+
+    click.echo(f"\n=== DEVELOPMENTAL STATE: {entity.name} ===\n")
+    click.echo(f"Entity Type: {entity.type.value}")
+    click.echo(f"Description: {entity.description[:60]}..." if len(entity.description) > 60 else f"Description: {entity.description}")
+    click.echo("")
+
+    if not state:
+        click.echo("This entity is not a seed (no developmental state).")
+        click.echo("Only SEED, CURIOUS, and EMERGENT types have developmental tracking.")
+        return
+
+    # Potency
+    potency_desc = {
+        Potency.TOTIPOTENT: "Can become anything",
+        Potency.PLURIPOTENT: "Can become most things",
+        Potency.MULTIPOTENT: "Several paths remain",
+        Potency.OLIGOPOTENT: "Few paths remain",
+        Potency.UNIPOTENT: "One clear path",
+        Potency.DIFFERENTIATED: "Identity crystallized",
+    }
+    click.echo(f"Potency: {state.potency.value.upper()}")
+    click.echo(f"  {potency_desc.get(state.potency, '')}")
+    click.echo("")
+
+    # Life stage
+    stage_desc = {
+        LifeStage.DORMANT: "Waiting to germinate",
+        LifeStage.GERMINATING: "Starting to emerge",
+        LifeStage.GROWING: "Developing capacity",
+        LifeStage.BRANCHING: "Exploring possibilities",
+        LifeStage.FLOWERING: "Expressing potential",
+        LifeStage.FRUITING: "Producing value",
+        LifeStage.SEEDING: "Spawning new entities",
+        LifeStage.CHRYSALIS: "Undergoing transformation",
+        LifeStage.CRYSTALLIZED: "Fixed identity",
+        LifeStage.SENESCENT: "Winding down",
+        LifeStage.COMPOSTING: "Returning nutrients",
+    }
+    click.echo(f"Life Stage: {state.life_stage.value.upper()}")
+    click.echo(f"  {stage_desc.get(state.life_stage, '')}")
+    click.echo("")
+
+    # Differentiation - use the DifferentiationPressure's leading_types
+    leading = state.differentiation.leading_types
+    if leading:
+        click.echo("Differentiation Signals (strongest pulls):")
+        for entity_type, strength in leading[:5]:
+            bar = "#" * int(strength * 20)
+            click.echo(f"  {entity_type.value:<20} [{bar:<20}] {strength:.0%}")
+
+        click.echo("")
+        click.echo(f"Commitment level: {state.differentiation.commitment_level:.0%}")
+    else:
+        click.echo("No differentiation signals yet.")
+    click.echo("")
+
+    # Virtue activations (extract from signals)
+    virtue_counts = {}
+    for signal in state.differentiation.signals:
+        if signal.signal_type == "virtue":
+            # Source is like "virtue:V03"
+            virtue_id = signal.source.replace("virtue:", "")
+            if virtue_id not in virtue_counts:
+                virtue_counts[virtue_id] = 0
+            virtue_counts[virtue_id] += 1
+    if virtue_counts:
+        click.echo("Recent Virtue Activations:")
+        for v_id, count in sorted(virtue_counts.items(), key=lambda x: -x[1])[:5]:
+            click.echo(f"  {v_id}: {count} signals")
+        click.echo("")
+
+    # Chrysalis state
+    if state.chrysalis:
+        click.echo("CHRYSALIS STATE:")
+        click.echo(f"  Phase: {state.chrysalis.phase.value}")
+        click.echo(f"  Target type: {state.chrysalis.emerging_type.value if state.chrysalis.emerging_type else 'undetermined'}")
+        click.echo(f"  Active: {state.chrysalis.is_active}")
+        click.echo(f"  Complete: {state.chrysalis.is_complete}")
+        click.echo("")
+
+
+@cli.command()
+@click.argument("community_name")
+def niche(community_name):
+    """View the niche dynamics of a community.
+
+    Shows type distribution, inhibition effects, and vacuum
+    pulls that shape what seeds can become in this community.
+    """
+    from ..core.development import get_dev_manager
+    from ..core.graph_store import get_core_store
+
+    store = get_core_store()
+    comm = store.get_community_by_name(community_name)
+
+    if not comm:
+        click.echo(f"Community not found: {community_name}")
+        return
+
+    manager = get_dev_manager()
+    niche = manager.get_niche(comm.id)
+
+    click.echo(f"\n=== NICHE DYNAMICS: {comm.name} ===\n")
+
+    # Type distribution (census)
+    if niche.type_census:
+        click.echo("Type Distribution:")
+        for entity_type, count in sorted(
+            niche.type_census.items(),
+            key=lambda x: x[1],
+            reverse=True
+        ):
+            bar = "#" * min(count * 2, 20)
+            click.echo(f"  {entity_type.value:<20} [{bar:<20}] {count}")
+        click.echo("")
+    else:
+        click.echo("No typed members yet.")
+        click.echo("")
+
+    # Lateral inhibition
+    if niche.type_census:
+        click.echo("Lateral Inhibition (present types suppress similar seeds):")
+        saturated = niche.get_saturated_types()
+        if saturated:
+            for entity_type in saturated[:5]:
+                count = niche.type_census.get(entity_type, 0)
+                click.echo(f"  - {entity_type.value} (count: {count})")
+        else:
+            click.echo("  No types at saturation threshold yet")
+        click.echo("")
+
+    # Vacuum pulls (types that are needed)
+    click.echo("Vacuum Pulls (absent types attract new seeds):")
+    vacuums = niche.get_vacuum_types()
+    if vacuums:
+        for entity_type in vacuums[:5]:
+            click.echo(f"  - {entity_type.value}")
+    else:
+        click.echo("  No vacuum pulls detected")
+    click.echo("")
+
+    # Virtue gradients
+    if niche.virtue_gradient:
+        click.echo("Virtue Gradients (community virtue emphasis):")
+        sorted_virtues = sorted(
+            niche.virtue_gradient.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        for virtue, strength in sorted_virtues[:5]:
+            bar = "#" * int(strength * 20)
+            click.echo(f"  {virtue:<20} [{bar:<20}] {strength:.0%}")
+    click.echo("")
+
+
+@cli.command()
+@click.argument("entity_id")
+@click.argument("virtue_id")
+@click.option("--strength", default=1.0, help="Signal strength (0-1)")
+def differentiate(entity_id, virtue_id, strength):
+    """Send a differentiation signal to an entity.
+
+    Virtue activations push entities toward specific types.
+    For example, V09 (Justice) pulls toward MOVEMENT, COMMONS, VALUE types.
+
+    Example:
+      differentiate entity_abc123 V09 --strength 0.8
+    """
+    from ..core.development import get_dev_manager
+    from ..core.graph_store import get_core_store
+    from ..core.biomimicry import VIRTUE_TYPE_ASSOCIATIONS
+
+    store = get_core_store()
+    entity = store.get_entity(entity_id)
+
+    if not entity:
+        click.echo(f"Entity not found: {entity_id}")
+        return
+
+    manager = get_dev_manager()
+    state = manager.get_state(entity_id)
+
+    if not state:
+        click.echo(f"Entity {entity_id} is not a seed (no developmental state).")
+        return
+
+    # Show what this virtue affects
+    associations = VIRTUE_TYPE_ASSOCIATIONS.get(virtue_id, {})
+    if associations:
+        click.echo(f"Virtue {virtue_id} associations:")
+        for etype, affinity in associations.items():
+            click.echo(f"  - {etype.value}: {affinity:.0%}")
+        click.echo("")
+
+    click.echo(f"Sending differentiation signal: {virtue_id} (strength {strength})")
+    manager.process_virtue_activation(entity_id, virtue_id, strength)
+
+    # Get updated state
+    state = manager.get_state(entity_id)
+    click.echo(f"\nResult:")
+    click.echo(f"  Potency: {state.potency.value}")
+    click.echo(f"  Life stage: {state.life_stage.value}")
+    click.echo(f"  Commitment: {state.differentiation.commitment_level:.0%}")
+
+    leading = state.differentiation.leading_types
+    if leading:
+        click.echo(f"  Strongest pull: {leading[0][0].value} ({leading[0][1]:.0%})")
+
+
+@cli.command()
+@click.argument("entity_id")
+@click.option("--target", default=None, help="Target type to transform into")
+@click.option("--force", is_flag=True, help="Force transformation even if not ready")
+def chrysalis(entity_id, target, force):
+    """Begin metamorphosis for an entity.
+
+    Transforms a seed into its crystallized form. The entity
+    enters a chrysalis state where old patterns dissolve and
+    new identity emerges.
+
+    Example:
+      chrysalis entity_abc123 --target ecosystem
+    """
+    from ..core.development import get_dev_manager
+    from ..core.graph_store import get_core_store
+    from ..core.entity import EntityType
+    from ..core.biomimicry import Potency
+
+    store = get_core_store()
+    entity = store.get_entity(entity_id)
+
+    if not entity:
+        click.echo(f"Entity not found: {entity_id}")
+        return
+
+    manager = get_dev_manager()
+    state = manager.get_state(entity_id)
+
+    if not state:
+        click.echo(f"Entity {entity_id} is not a seed (no developmental state).")
+        return
+
+    # Check readiness
+    if not force and state.differentiation.commitment_level < 0.6:
+        click.echo(f"Entity not ready for metamorphosis.")
+        click.echo(f"  Commitment level: {state.differentiation.commitment_level:.0%} (need 60%)")
+        click.echo(f"  Use --force to override.")
+        return
+
+    if not force and state.potency not in (Potency.UNIPOTENT, Potency.OLIGOPOTENT):
+        click.echo(f"Entity not ready for metamorphosis.")
+        click.echo(f"  Potency: {state.potency.value} (need oligopotent or unipotent)")
+        click.echo(f"  Use --force to override.")
+        return
+
+    # Parse target type
+    target_type = None
+    if target:
+        try:
+            target_type = EntityType(target)
+        except ValueError:
+            click.echo(f"Unknown entity type: {target}")
+            click.echo(f"Valid types: {', '.join([t.value for t in EntityType])}")
+            return
+
+    click.echo(f"\n=== BEGINNING METAMORPHOSIS ===\n")
+    click.echo(f"Entity: {entity.name}")
+    click.echo(f"Current type: {entity.type.value}")
+
+    if target_type:
+        click.echo(f"Target type: {target_type.value}")
+    else:
+        leading = state.differentiation.leading_types
+        if leading:
+            click.echo(f"Inferred target: {leading[0][0].value}")
+
+    chrysalis_state = manager.begin_crystallization(entity_id, target_type)
+
+    if not chrysalis_state:
+        click.echo(f"Error: Could not begin crystallization. Entity may not be ready.")
+        return
+
+    click.echo(f"\nChrysalis entered:")
+    click.echo(f"  Phase: {chrysalis_state.phase.value}")
+    click.echo(f"  Target: {chrysalis_state.emerging_type.value if chrysalis_state.emerging_type else 'determining'}")
+    click.echo(f"  Active: {chrysalis_state.is_active}")
+    click.echo("")
+    click.echo("Use 'develop' command to track transformation progress.")
+
+
+@cli.command()
+@click.argument("entity_ids", nargs=-1, required=True)
+@click.option("--name", required=True, help="Name for the fused entity")
+@click.option("--target-type", default=None, help="Target type for fused entity (defaults to most common)")
+def propose_fusion(entity_ids, name, target_type):
+    """Propose fusion of multiple entities (symbiogenesis).
+
+    When entities have developed complementary capabilities,
+    they may fuse into a more complex form - like mitochondria
+    becoming part of eukaryotic cells.
+
+    Example:
+      propose-fusion entity_a entity_b --name "Merged Voice"
+    """
+    from ..core.development import get_dev_manager
+    from ..core.graph_store import get_core_store
+    from ..core.entity import EntityType
+
+    store = get_core_store()
+    manager = get_dev_manager()
+
+    # Validate entities
+    entities = []
+    for eid in entity_ids:
+        entity = store.get_entity(eid)
+        if not entity:
+            click.echo(f"Entity not found: {eid}")
+            return
+        entities.append(entity)
+
+    if len(entities) < 2:
+        click.echo("Need at least 2 entities to propose fusion.")
+        return
+
+    click.echo(f"\n=== FUSION PROPOSAL ===\n")
+    click.echo(f"Entities to fuse:")
+    for entity in entities:
+        click.echo(f"  - {entity.name} ({entity.type.value})")
+
+    # Determine target type
+    if target_type:
+        try:
+            ttype = EntityType(target_type)
+        except ValueError:
+            click.echo(f"Unknown entity type: {target_type}")
+            return
+    else:
+        # Default to emergent or most common type
+        type_counts = {}
+        for e in entities:
+            if e.type not in type_counts:
+                type_counts[e.type] = 0
+            type_counts[e.type] += 1
+        ttype = max(type_counts.keys(), key=lambda t: type_counts[t]) if type_counts else EntityType.EMERGENT
+
+    proposal = manager.propose_fusion(
+        source_entity_ids=list(entity_ids),
+        target_type=ttype,
+        target_name=name,
+    )
+
+    if not proposal:
+        click.echo(f"Error: Could not create fusion proposal.")
+        return
+
+    click.echo(f"\nProposal created:")
+    click.echo(f"  ID: {proposal.proposal_id}")
+    click.echo(f"  New name: {proposal.target_name}")
+    click.echo(f"  Resulting type: {proposal.target_type.value}")
+    click.echo("")
+    click.echo(f"Approval needed from all source entities.")
+    click.echo(f"Use 'execute-fusion {proposal.proposal_id}' after approvals.")
+
+
+@cli.command()
+@click.argument("proposal_id")
+def execute_fusion(proposal_id):
+    """Execute a previously proposed entity fusion.
+
+    This will:
+    - Create a new fused entity
+    - Merge attributes and facts
+    - Dissolve the source entities
+    - Update community memberships
+    """
+    from ..core.development import get_dev_manager
+
+    manager = get_dev_manager()
+
+    click.echo(f"Executing fusion: {proposal_id}")
+
+    try:
+        fused_entity = manager.execute_fusion(proposal_id)
+    except ValueError as e:
+        click.echo(f"Error: {e}")
+        return
+
+    click.echo(f"\n=== FUSION COMPLETE ===\n")
+    click.echo(f"New entity: {fused_entity.name}")
+    click.echo(f"ID: {fused_entity.id}")
+    click.echo(f"Type: {fused_entity.type.value}")
+    click.echo(f"Description: {fused_entity.description}")
+    click.echo("")
+    click.echo("Source entities have been dissolved.")
+    click.echo("The fused entity inherits all community memberships.")
+
+
+@cli.command()
+@click.argument("community_name")
+def quorum(community_name):
+    """Check quorum patterns in a community.
+
+    When enough members hold a pattern (beliefs, behaviors, virtues),
+    it becomes a collective property that influences all members.
+    """
+    from ..core.development import get_dev_manager
+    from ..core.graph_store import get_core_store
+
+    store = get_core_store()
+    comm = store.get_community_by_name(community_name)
+
+    if not comm:
+        click.echo(f"Community not found: {community_name}")
+        return
+
+    manager = get_dev_manager()
+    quorum_state = manager.get_quorum(comm.id)
+
+    click.echo(f"\n=== QUORUM STATE: {comm.name} ===\n")
+    click.echo(f"Member count: {comm.member_count}")
+    click.echo(f"Quorum threshold: {quorum_state.quorum_threshold}")
+    click.echo("")
+
+    # Show patterns that reached quorum
+    community_patterns = quorum_state.community_patterns
+    if community_patterns:
+        click.echo("Patterns at quorum (collective properties):")
+        for pattern in community_patterns:
+            holders = quorum_state.pattern_holders.get(pattern, set())
+            click.echo(f"  - {pattern}: {len(holders)} members")
+        click.echo("")
+    else:
+        click.echo("No patterns have reached quorum yet.")
+        click.echo("")
+
+    # Show patterns approaching quorum (using emerging_patterns property)
+    emerging = quorum_state.emerging_patterns
+    if emerging:
+        click.echo("Patterns approaching quorum:")
+        for pattern, current, threshold in emerging:
+            needed = threshold - current
+            click.echo(f"  - {pattern}: {current} members (need {needed} more)")
+        click.echo("")
+
+
+@cli.command()
+@click.argument("entity_id")
+@click.argument("topics")
+@click.option("--partner-types", default=None, help="Comma-separated list of partner entity types")
+def converse(entity_id, topics, partner_types):
+    """Simulate a conversation affecting entity development.
+
+    Conversation topics push seeds toward certain types.
+    For example, discussing "ecology" and "community" pushes
+    toward ECOSYSTEM or NEIGHBORHOOD types.
+
+    Example:
+      converse entity_abc123 "ecology,sustainability,water"
+    """
+    from ..core.development import get_dev_manager, TOPIC_TYPE_ASSOCIATIONS
+    from ..core.graph_store import get_core_store
+    from ..core.entity import EntityType
+
+    store = get_core_store()
+    entity = store.get_entity(entity_id)
+
+    if not entity:
+        click.echo(f"Entity not found: {entity_id}")
+        return
+
+    manager = get_dev_manager()
+    state = manager.get_state(entity_id)
+
+    if not state:
+        click.echo(f"Entity {entity_id} is not a seed (no developmental state).")
+        return
+
+    # Parse topics
+    topic_list = [t.strip() for t in topics.split(",")]
+
+    # Parse partner types
+    partner_type_list = None
+    if partner_types:
+        partner_type_list = []
+        for pt in partner_types.split(","):
+            try:
+                partner_type_list.append(EntityType(pt.strip()))
+            except ValueError:
+                click.echo(f"Warning: Unknown partner type: {pt}")
+
+    click.echo(f"Processing conversation for {entity.name}")
+    click.echo(f"Topics: {', '.join(topic_list)}")
+
+    # Show what these topics affect
+    for topic in topic_list:
+        associations = TOPIC_TYPE_ASSOCIATIONS.get(topic.lower(), {})
+        if associations:
+            affects = [f"{t.value}:{s:.0%}" for t, s in list(associations.items())[:3]]
+            click.echo(f"  '{topic}' -> {', '.join(affects)}")
+
+    if partner_type_list:
+        click.echo(f"Partner types: {', '.join([pt.value for pt in partner_type_list])}")
+
+    result = manager.process_conversation(entity_id, topic_list, partner_type_list)
+
+    click.echo(f"\nResult:")
+    click.echo(f"  Life stage: {result.get('life_stage', 'unknown')}")
+    click.echo(f"  Potency: {result.get('new_potency', 'unknown')}")
+    click.echo(f"  Signals added: {result.get('signals_added', 0)}")
+
+    # Show leading types
+    if result.get("leading_types"):
+        click.echo(f"\nLeading types:")
+        for lt in result["leading_types"][:3]:
+            click.echo(f"  - {lt['type']}: {lt['affinity']:.0%}")
