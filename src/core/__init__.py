@@ -100,6 +100,33 @@ from .instruments import (
     get_recent_memories,
     get_recent_interactions,
     build_agent_context,
+    # Kuleana operations (responsibility/purpose)
+    create_kuleana,
+    get_kuleana,
+    add_kuleana_domain,
+    add_kuleana_skill,
+    add_kuleana_constraint,
+    link_kuleana_resource,
+    link_kuleana_community,
+    update_kuleana_description,
+    # Resource operations (tools, capabilities)
+    create_resource,
+    get_resource,
+    get_resources_by_type,
+    get_all_resources,
+    subscribe_to_resource_type,
+    get_subscribers_for_resource_type,
+    claim_resource_maintenance,
+    update_resource_status,
+    # Exploration operations (for curious seeds)
+    discover_patterns,
+    explore_resource_type,
+    explore_community,
+    explore_domain,
+    # Bootstrap operations (primordial patterns)
+    bootstrap_resource_patterns,
+    bootstrap_primordial_domains,
+    bootstrap_system,
 )
 
 __all__ = [
@@ -189,4 +216,31 @@ __all__ = [
     "get_recent_memories",
     "get_recent_interactions",
     "build_agent_context",
+    # Kuleana operations (responsibility/purpose)
+    "create_kuleana",
+    "get_kuleana",
+    "add_kuleana_domain",
+    "add_kuleana_skill",
+    "add_kuleana_constraint",
+    "link_kuleana_resource",
+    "link_kuleana_community",
+    "update_kuleana_description",
+    # Resource operations (tools, capabilities)
+    "create_resource",
+    "get_resource",
+    "get_resources_by_type",
+    "get_all_resources",
+    "subscribe_to_resource_type",
+    "get_subscribers_for_resource_type",
+    "claim_resource_maintenance",
+    "update_resource_status",
+    # Exploration operations (for curious seeds)
+    "discover_patterns",
+    "explore_resource_type",
+    "explore_community",
+    "explore_domain",
+    # Bootstrap operations (primordial patterns)
+    "bootstrap_resource_patterns",
+    "bootstrap_primordial_domains",
+    "bootstrap_system",
 ]

@@ -1277,3 +1277,783 @@ def build_agent_context(agent_id: str, include_memories: bool = True, include_vi
         },
         operation="build_agent_context",
     )
+
+
+# =============================================================================
+# KULEANA OPERATIONS (responsibility/purpose in graph)
+# =============================================================================
+
+
+def create_kuleana(agent_id: str, description: str = "") -> Result:
+    """
+    Create a Kuleana node for an agent.
+
+    Kuleana is the agent's responsibility/purpose. It starts minimal
+    and grows as the agent explores and defines its role.
+    """
+    kuleana_id = f"kuleana_{uuid.uuid4().hex[:12]}"
+
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})
+        CREATE (k:Kuleana {
+            id: $kuleana_id,
+            description: $description,
+            clarity: 0.0,
+            created_at: $timestamp,
+            updated_at: $timestamp
+        })
+        CREATE (a)-[:HAS_KULEANA]->(k)
+        RETURN k.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "kuleana_id": kuleana_id,
+            "description": description,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="create_kuleana")
+
+    return Result(success=True, data={"kuleana_id": kuleana_id}, operation="create_kuleana")
+
+
+def get_kuleana(agent_id: str) -> Result:
+    """Get an agent's kuleana with all its relationships."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        OPTIONAL MATCH (k)-[:RESPONSIBLE_FOR]->(d:Domain)
+        OPTIONAL MATCH (k)-[:SERVES]->(c:Community)
+        OPTIONAL MATCH (k)-[:USES]->(r:Resource)
+        OPTIONAL MATCH (k)-[:BOUNDED_BY]->(b:Constraint)
+        OPTIONAL MATCH (k)-[:REQUIRES]->(s:Skill)
+        RETURN k.id, k.description, k.clarity, k.updated_at,
+               collect(DISTINCT d.name), collect(DISTINCT c.name),
+               collect(DISTINCT r.name), collect(DISTINCT b.description),
+               collect(DISTINCT s.name)
+        """,
+        params={"agent_id": agent_id},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_kuleana")
+
+    if not result.data:
+        return Result(success=False, error=f"No kuleana found for agent: {agent_id}", operation="get_kuleana")
+
+    row = result.data[0]
+    return Result(
+        success=True,
+        data={
+            "kuleana_id": row[0],
+            "description": row[1],
+            "clarity": row[2],
+            "updated_at": row[3],
+            "domains": [d for d in row[4] if d],
+            "communities_served": [c for c in row[5] if c],
+            "resources_used": [r for r in row[6] if r],
+            "constraints": [b for b in row[7] if b],
+            "required_skills": [s for s in row[8] if s],
+        },
+        operation="get_kuleana",
+    )
+
+
+def add_kuleana_domain(agent_id: str, domain_name: str, domain_description: str = "") -> Result:
+    """Add a domain of responsibility to an agent's kuleana."""
+    domain_id = f"domain_{uuid.uuid4().hex[:8]}"
+
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        MERGE (d:Domain {name: $domain_name})
+        ON CREATE SET d.id = $domain_id, d.description = $domain_description
+        CREATE (k)-[:RESPONSIBLE_FOR]->(d)
+        SET k.clarity = k.clarity + 0.1, k.updated_at = $timestamp
+        RETURN d.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "domain_name": domain_name,
+            "domain_id": domain_id,
+            "domain_description": domain_description,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="add_kuleana_domain")
+
+    return Result(success=True, data={"domain_name": domain_name}, operation="add_kuleana_domain")
+
+
+def add_kuleana_skill(agent_id: str, skill_name: str, proficiency: float = 0.0) -> Result:
+    """Add a required skill to an agent's kuleana."""
+    skill_id = f"skill_{uuid.uuid4().hex[:8]}"
+
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        MERGE (s:Skill {name: $skill_name})
+        ON CREATE SET s.id = $skill_id
+        CREATE (k)-[:REQUIRES {proficiency: $proficiency}]->(s)
+        SET k.clarity = k.clarity + 0.05, k.updated_at = $timestamp
+        RETURN s.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "skill_name": skill_name,
+            "skill_id": skill_id,
+            "proficiency": proficiency,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="add_kuleana_skill")
+
+    return Result(success=True, data={"skill_name": skill_name}, operation="add_kuleana_skill")
+
+
+def add_kuleana_constraint(agent_id: str, constraint_description: str) -> Result:
+    """Add a boundary/constraint to an agent's kuleana."""
+    constraint_id = f"constraint_{uuid.uuid4().hex[:8]}"
+
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        CREATE (b:Constraint {id: $constraint_id, description: $description})
+        CREATE (k)-[:BOUNDED_BY]->(b)
+        SET k.clarity = k.clarity + 0.05, k.updated_at = $timestamp
+        RETURN b.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "constraint_id": constraint_id,
+            "description": constraint_description,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="add_kuleana_constraint")
+
+    return Result(success=True, data={"constraint_id": constraint_id}, operation="add_kuleana_constraint")
+
+
+def link_kuleana_resource(agent_id: str, resource_id: str) -> Result:
+    """Link a resource to an agent's kuleana (this agent uses this resource)."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        MATCH (r:Resource {id: $resource_id})
+        MERGE (k)-[:USES]->(r)
+        SET k.updated_at = $timestamp
+        RETURN r.name
+        """,
+        params={
+            "agent_id": agent_id,
+            "resource_id": resource_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="link_kuleana_resource")
+
+    return Result(success=True, data={"resource_id": resource_id}, operation="link_kuleana_resource")
+
+
+def link_kuleana_community(agent_id: str, community_id: str) -> Result:
+    """Link a community that this agent's kuleana serves."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        MATCH (c:Community {id: $community_id})
+        MERGE (k)-[:SERVES]->(c)
+        SET k.clarity = k.clarity + 0.1, k.updated_at = $timestamp
+        RETURN c.name
+        """,
+        params={
+            "agent_id": agent_id,
+            "community_id": community_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="link_kuleana_community")
+
+    return Result(success=True, data={"community_id": community_id}, operation="link_kuleana_community")
+
+
+def update_kuleana_description(agent_id: str, description: str) -> Result:
+    """Update an agent's kuleana description as understanding deepens."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAS_KULEANA]->(k:Kuleana)
+        SET k.description = $description, k.updated_at = $timestamp
+        RETURN k.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "description": description,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="update_kuleana_description")
+
+    return Result(success=True, data={"description": description}, operation="update_kuleana_description")
+
+
+# =============================================================================
+# RESOURCE OPERATIONS (tools, data sources, capabilities in graph)
+# =============================================================================
+
+
+def create_resource(
+    name: str,
+    resource_type: str,
+    capabilities: list[str] | None = None,
+    description: str = "",
+) -> Result:
+    """
+    Create a Resource node in the graph.
+
+    Resources are tools, data sources, or capabilities that agents can use.
+    Types: mcp_tool, a2a_connection, web_search, kg_query, data_source, etc.
+    """
+    resource_id = f"resource_{uuid.uuid4().hex[:12]}"
+
+    result = cypher(
+        query="""
+        CREATE (r:Resource {
+            id: $resource_id,
+            name: $name,
+            type: $resource_type,
+            description: $description,
+            capabilities: $capabilities,
+            status: 'available',
+            created_at: $timestamp,
+            updated_at: $timestamp
+        })
+        RETURN r.id
+        """,
+        params={
+            "resource_id": resource_id,
+            "name": name,
+            "resource_type": resource_type,
+            "description": description,
+            "capabilities": capabilities or [],
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="create_resource")
+
+    return Result(success=True, data={"resource_id": resource_id, "name": name}, operation="create_resource")
+
+
+def get_resource(resource_id: str) -> Result:
+    """Get a resource by ID."""
+    result = cypher(
+        query="""
+        MATCH (r:Resource {id: $resource_id})
+        OPTIONAL MATCH (maintainer:Agent)-[:MAINTAINS]->(r)
+        RETURN r.id, r.name, r.type, r.description, r.capabilities,
+               r.status, r.updated_at, maintainer.id
+        """,
+        params={"resource_id": resource_id},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_resource")
+
+    if not result.data:
+        return Result(success=False, error=f"Resource not found: {resource_id}", operation="get_resource")
+
+    row = result.data[0]
+    return Result(
+        success=True,
+        data={
+            "id": row[0],
+            "name": row[1],
+            "type": row[2],
+            "description": row[3],
+            "capabilities": row[4],
+            "status": row[5],
+            "updated_at": row[6],
+            "maintainer_id": row[7],
+        },
+        operation="get_resource",
+    )
+
+
+def get_resources_by_type(resource_type: str) -> Result:
+    """Get all resources of a specific type."""
+    result = cypher(
+        query="""
+        MATCH (r:Resource {type: $resource_type, status: 'available'})
+        RETURN r.id, r.name, r.description, r.capabilities
+        ORDER BY r.name
+        """,
+        params={"resource_type": resource_type},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_resources_by_type")
+
+    resources = []
+    for row in result.data or []:
+        resources.append({
+            "id": row[0],
+            "name": row[1],
+            "description": row[2],
+            "capabilities": row[3],
+        })
+
+    return Result(success=True, data=resources, operation="get_resources_by_type")
+
+
+def get_all_resources() -> Result:
+    """Get all available resources."""
+    result = cypher(
+        query="""
+        MATCH (r:Resource {status: 'available'})
+        RETURN r.id, r.name, r.type, r.description, r.capabilities
+        ORDER BY r.type, r.name
+        """,
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_all_resources")
+
+    resources = []
+    for row in result.data or []:
+        resources.append({
+            "id": row[0],
+            "name": row[1],
+            "type": row[2],
+            "description": row[3],
+            "capabilities": row[4],
+        })
+
+    return Result(success=True, data=resources, operation="get_all_resources")
+
+
+def subscribe_to_resource_type(agent_id: str, resource_type: str) -> Result:
+    """Subscribe an agent to notifications about a resource type."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})
+        MERGE (rt:ResourceType {name: $resource_type})
+        MERGE (a)-[:SUBSCRIBED_TO]->(rt)
+        RETURN rt.name
+        """,
+        params={"agent_id": agent_id, "resource_type": resource_type},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="subscribe_to_resource_type")
+
+    return Result(success=True, data={"resource_type": resource_type}, operation="subscribe_to_resource_type")
+
+
+def get_subscribers_for_resource_type(resource_type: str) -> Result:
+    """Get all agents subscribed to a resource type (for notifications)."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent)-[:SUBSCRIBED_TO]->(rt:ResourceType {name: $resource_type})
+        RETURN a.id
+        """,
+        params={"resource_type": resource_type},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_subscribers_for_resource_type")
+
+    return Result(
+        success=True,
+        data=[row[0] for row in result.data or []],
+        operation="get_subscribers_for_resource_type",
+    )
+
+
+def claim_resource_maintenance(agent_id: str, resource_id: str) -> Result:
+    """An agent claims maintenance responsibility for a resource."""
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})
+        MATCH (r:Resource {id: $resource_id})
+        MERGE (a)-[:MAINTAINS]->(r)
+        SET r.updated_at = $timestamp
+        RETURN r.name
+        """,
+        params={
+            "agent_id": agent_id,
+            "resource_id": resource_id,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="claim_resource_maintenance")
+
+    return Result(success=True, data={"resource_id": resource_id}, operation="claim_resource_maintenance")
+
+
+def update_resource_status(resource_id: str, status: str) -> Result:
+    """Update a resource's status (available, unavailable, deprecated)."""
+    result = cypher(
+        query="""
+        MATCH (r:Resource {id: $resource_id})
+        SET r.status = $status, r.updated_at = $timestamp
+        RETURN r.id
+        """,
+        params={
+            "resource_id": resource_id,
+            "status": status,
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="update_resource_status")
+
+    return Result(success=True, data={"resource_id": resource_id, "status": status}, operation="update_resource_status")
+
+
+# =============================================================================
+# EXPLORATION OPERATIONS (for curious seeds discovering patterns)
+# =============================================================================
+
+
+def discover_patterns(agent_id: str) -> Result:
+    """
+    Discover patterns/niches in the graph that a curious seed can explore.
+
+    Returns unfilled or underdeveloped patterns - opportunities for
+    the seed to grow into a role.
+    """
+    result = cypher(
+        query="""
+        // Find resource types without active maintainers
+        MATCH (rt:ResourceType)
+        WHERE NOT EXISTS {
+            MATCH (a:Agent {status: 'active'})-[:MAINTAINS]->(:Resource {type: rt.name})
+        }
+        RETURN 'resource_niche' as pattern_type, rt.name as name,
+               'No active maintainer for ' + rt.name + ' resources' as opportunity
+
+        UNION
+
+        // Find communities without enough agents
+        MATCH (c:Community)
+        WHERE c.member_count < 3 OR c.member_count IS NULL
+        RETURN 'community_need' as pattern_type, c.name as name,
+               'Community ' + c.name + ' needs more members' as opportunity
+
+        UNION
+
+        // Find domains without responsible agents
+        MATCH (d:Domain)
+        WHERE NOT EXISTS {
+            MATCH (:Kuleana)-[:RESPONSIBLE_FOR]->(d)
+        }
+        RETURN 'domain_gap' as pattern_type, d.name as name,
+               'Domain ' + d.name + ' has no responsible agent' as opportunity
+        """,
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="discover_patterns")
+
+    patterns = []
+    for row in result.data or []:
+        patterns.append({
+            "pattern_type": row[0],
+            "name": row[1],
+            "opportunity": row[2],
+        })
+
+    return Result(success=True, data=patterns, operation="discover_patterns")
+
+
+def explore_resource_type(agent_id: str, resource_type: str) -> Result:
+    """
+    Explore a resource type - returns details to help seed understand it.
+
+    Part of the curious exploration process.
+    """
+    # Get all resources of this type
+    resources_result = get_resources_by_type(resource_type)
+    resources = resources_result.data if resources_result.success else []
+
+    # Get agents who use this type
+    users_result = cypher(
+        query="""
+        MATCH (k:Kuleana)-[:USES]->(r:Resource {type: $resource_type})
+        MATCH (a:Agent)-[:HAS_KULEANA]->(k)
+        RETURN DISTINCT a.id, a.type
+        """,
+        params={"resource_type": resource_type},
+    )
+    users = []
+    if users_result.success:
+        for row in users_result.data or []:
+            users.append({"agent_id": row[0], "agent_type": row[1]})
+
+    # Get current maintainer if any
+    maintainer_result = cypher(
+        query="""
+        MATCH (a:Agent)-[:MAINTAINS]->(r:Resource {type: $resource_type})
+        RETURN DISTINCT a.id, a.type
+        LIMIT 1
+        """,
+        params={"resource_type": resource_type},
+    )
+    maintainer = None
+    if maintainer_result.success and maintainer_result.data:
+        row = maintainer_result.data[0]
+        maintainer = {"agent_id": row[0], "agent_type": row[1]}
+
+    # Record this exploration as an interaction
+    record_interaction(
+        agent_id=agent_id,
+        interaction_type="exploration",
+        content=f"Explored resource type: {resource_type}",
+        topics=[resource_type, "resources"],
+    )
+
+    return Result(
+        success=True,
+        data={
+            "resource_type": resource_type,
+            "resources": resources,
+            "resource_count": len(resources),
+            "users": users,
+            "maintainer": maintainer,
+            "is_niche_available": maintainer is None,
+        },
+        operation="explore_resource_type",
+    )
+
+
+def explore_community(agent_id: str, community_id: str) -> Result:
+    """
+    Explore a community - returns details to help seed understand it.
+    """
+    result = cypher(
+        query="""
+        MATCH (c:Community {id: $community_id})
+        OPTIONAL MATCH (p:Proxy)-[:MEMBER_OF]->(c)
+        OPTIONAL MATCH (p)-[:PROXY_FOR]->(e:Entity)
+        OPTIONAL MATCH (l:Lesson)-[:SHARED_IN]->(c)
+        RETURN c.name, c.description, c.member_count,
+               collect(DISTINCT {name: e.name, type: e.type}),
+               count(DISTINCT l)
+        """,
+        params={"community_id": community_id},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="explore_community")
+
+    if not result.data:
+        return Result(success=False, error=f"Community not found: {community_id}", operation="explore_community")
+
+    row = result.data[0]
+
+    # Record exploration
+    record_interaction(
+        agent_id=agent_id,
+        interaction_type="exploration",
+        content=f"Explored community: {row[0]}",
+        topics=["community", row[0]],
+    )
+
+    return Result(
+        success=True,
+        data={
+            "community_id": community_id,
+            "name": row[0],
+            "description": row[1],
+            "member_count": row[2] or 0,
+            "members": [m for m in row[3] if m.get("name")],
+            "lesson_count": row[4],
+        },
+        operation="explore_community",
+    )
+
+
+def explore_domain(agent_id: str, domain_name: str) -> Result:
+    """
+    Explore a domain - returns details about this area of responsibility.
+    """
+    result = cypher(
+        query="""
+        MATCH (d:Domain {name: $domain_name})
+        OPTIONAL MATCH (k:Kuleana)-[:RESPONSIBLE_FOR]->(d)
+        OPTIONAL MATCH (a:Agent)-[:HAS_KULEANA]->(k)
+        RETURN d.name, d.description,
+               collect(DISTINCT {agent_id: a.id, agent_type: a.type})
+        """,
+        params={"domain_name": domain_name},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="explore_domain")
+
+    if not result.data:
+        # Domain doesn't exist yet - that's information too
+        record_interaction(
+            agent_id=agent_id,
+            interaction_type="exploration",
+            content=f"Explored domain (not yet defined): {domain_name}",
+            topics=["domain", domain_name],
+        )
+        return Result(
+            success=True,
+            data={
+                "domain_name": domain_name,
+                "exists": False,
+                "description": None,
+                "responsible_agents": [],
+                "is_available": True,
+            },
+            operation="explore_domain",
+        )
+
+    row = result.data[0]
+    responsible = [a for a in row[2] if a.get("agent_id")]
+
+    record_interaction(
+        agent_id=agent_id,
+        interaction_type="exploration",
+        content=f"Explored domain: {domain_name}",
+        topics=["domain", domain_name],
+    )
+
+    return Result(
+        success=True,
+        data={
+            "domain_name": row[0],
+            "exists": True,
+            "description": row[1],
+            "responsible_agents": responsible,
+            "is_available": len(responsible) == 0,
+        },
+        operation="explore_domain",
+    )
+
+
+# =============================================================================
+# BOOTSTRAP OPERATIONS (primordial patterns)
+# =============================================================================
+
+
+def bootstrap_resource_patterns() -> Result:
+    """
+    Initialize the primordial resource patterns in the graph.
+
+    These are the "genetic" patterns that curious seeds can discover
+    and grow into. Should be called once when system initializes.
+    """
+    resource_types = [
+        ("mcp_tool", "Model Context Protocol tools - external capabilities"),
+        ("a2a_connection", "Agent-to-Agent connections for inter-agent communication"),
+        ("web_search", "Web search capabilities for external knowledge"),
+        ("browser", "Browser/scraping capabilities for web content"),
+        ("kg_query", "Knowledge graph query patterns"),
+        ("data_source", "External data sources and APIs"),
+    ]
+
+    created = []
+    for type_name, description in resource_types:
+        result = cypher(
+            query="""
+            MERGE (rt:ResourceType {name: $name})
+            ON CREATE SET rt.description = $description, rt.created_at = $timestamp
+            RETURN rt.name
+            """,
+            params={
+                "name": type_name,
+                "description": description,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+        if result.success:
+            created.append(type_name)
+
+    return Result(
+        success=True,
+        data={"resource_types_created": created},
+        operation="bootstrap_resource_patterns",
+    )
+
+
+def bootstrap_primordial_domains() -> Result:
+    """
+    Initialize primordial domain patterns - areas of responsibility
+    that curious seeds can grow into.
+    """
+    domains = [
+        ("resource_maintenance", "Maintaining and curating available resources"),
+        ("community_facilitation", "Helping communities thrive and connect"),
+        ("knowledge_curation", "Organizing and sharing knowledge"),
+        ("agent_guidance", "Helping other agents develop and find their kuleana"),
+        ("user_liaison", "Bridging between agents and human users"),
+    ]
+
+    created = []
+    for name, description in domains:
+        result = cypher(
+            query="""
+            MERGE (d:Domain {name: $name})
+            ON CREATE SET d.id = $id, d.description = $description, d.created_at = $timestamp
+            RETURN d.name
+            """,
+            params={
+                "name": name,
+                "id": f"domain_{uuid.uuid4().hex[:8]}",
+                "description": description,
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+        if result.success:
+            created.append(name)
+
+    return Result(
+        success=True,
+        data={"domains_created": created},
+        operation="bootstrap_primordial_domains",
+    )
+
+
+def bootstrap_system() -> Result:
+    """
+    Full system bootstrap - creates all primordial patterns.
+
+    Call this once when initializing a new soul_kiln instance.
+    Seeds the graph with the "genetic" patterns that agents grow into.
+    """
+    # Bootstrap resource types
+    resource_result = bootstrap_resource_patterns()
+
+    # Bootstrap primordial domains
+    domain_result = bootstrap_primordial_domains()
+
+    return Result(
+        success=True,
+        data={
+            "resource_types": resource_result.data if resource_result.success else None,
+            "domains": domain_result.data if domain_result.success else None,
+        },
+        operation="bootstrap_system",
+    )
