@@ -1,28 +1,23 @@
 """
 Core domain models for Soul Kiln.
 
-The essential entities:
-- Entity: What a proxy represents (human, org, concept, object)
-- Proxy: The personified agent that speaks for an entity
-- Community: A group that shares everything
-
-All behavior flows through virtue basins toward emergent ethics.
+Soul_kiln provides graph operations for Agent Zero (A0).
+A0 is the runtime/orchestrator. Soul_kiln provides:
+- Entity/Proxy/Community models
+- Developmental biology (biomimicry)
+- Virtue basins
+- Graph operations (Cypher → FalkorDB)
 
 The core flow:
-1. User starts a conversation (smartphone, CLI, web)
-2. Conversation guides creation of a Proxy
-3. Proxy represents an Entity (human, org, concept, object)
-4. Proxy joins a Community
-5. Community members share everything (lessons, patterns, pathways)
-6. All behavior navigates virtue basins toward emergent good
+1. A0 receives human input
+2. A0 decides to spawn an agent → calls spawn_agent()
+3. Agent node created in graph (Entity → Proxy → Agent)
+4. A0 processes conversations → calls develop_agent()
+5. Differentiation signals accumulate in graph
+6. A0 triggers metamorphosis when ready → calls metamorphose_agent()
+7. Mature agents can spawn offspring → calls spawn_offspring()
 
-Biomimicry principles guide seed development:
-- Potency: Seeds have developmental potential that narrows as identity forms
-- Differentiation: Virtue activations and conversations push toward types
-- Niches: Communities shape what seeds can become
-- Quorum: Collective patterns emerge when enough members hold them
-- Metamorphosis: Major identity shifts require dissolution and reformation
-- Symbiogenesis: Entities can fuse into more complex forms
+Everything bottoms out at Cypher queries against FalkorDB.
 """
 
 from .entity import Entity, EntityType
@@ -61,48 +56,33 @@ from .development import (
     TOPIC_TYPE_ASSOCIATIONS,
 )
 from .instruments import (
-    # Core classes
-    InstrumentResult,
-    Instrument,
-    InstrumentRegistry,
-    ToolResult,
-    Tool,
-    ToolRegistry,
-    # Instruments (atomic SSFs)
+    # Result type
+    Result,
+    # Foundation
     cypher,
+    # Entity operations
     create_entity,
     get_entity,
+    # Proxy operations
     create_proxy,
-    create_agent,
+    # Agent node operations
+    create_agent_node,
     join_community,
+    # Development operations
     add_differentiation_signal,
     get_differentiation_signals,
     update_life_stage,
     set_entity_type,
+    # Sharing operations
     share_lesson,
+    # Virtue operations
     record_virtue_activation,
-    # Tools (collections of instruments)
+    # Composite operations (A0 tools)
     spawn_agent,
     develop_agent,
     metamorphose_agent,
     spawn_offspring,
     fuse_agents,
-    # Convenience functions
-    list_instruments,
-    get_instrument,
-    call_instrument,
-    list_tools,
-    get_tool,
-    call_tool,
-)
-from .runtime import (
-    Kuleana,
-    Message,
-    AgentRuntime,
-    SEED_KULEANA,
-    MATURE_KULEANA,
-    get_runtime,
-    create_runtime,
 )
 
 __all__ = [
@@ -155,19 +135,13 @@ __all__ = [
     "DevelopmentalManager",
     "get_dev_manager",
     "TOPIC_TYPE_ASSOCIATIONS",
-    # Instruments - Core classes
-    "InstrumentResult",
-    "Instrument",
-    "InstrumentRegistry",
-    "ToolResult",
-    "Tool",
-    "ToolRegistry",
-    # Instruments - Atomic SSFs
+    # Graph operations (for A0)
+    "Result",
     "cypher",
     "create_entity",
     "get_entity",
     "create_proxy",
-    "create_agent",
+    "create_agent_node",
     "join_community",
     "add_differentiation_signal",
     "get_differentiation_signals",
@@ -175,25 +149,10 @@ __all__ = [
     "set_entity_type",
     "share_lesson",
     "record_virtue_activation",
-    # Tools - Collections of instruments
+    # A0 tools
     "spawn_agent",
     "develop_agent",
     "metamorphose_agent",
     "spawn_offspring",
     "fuse_agents",
-    # Convenience functions
-    "list_instruments",
-    "get_instrument",
-    "call_instrument",
-    "list_tools",
-    "get_tool",
-    "call_tool",
-    # Runtime
-    "Kuleana",
-    "Message",
-    "AgentRuntime",
-    "SEED_KULEANA",
-    "MATURE_KULEANA",
-    "get_runtime",
-    "create_runtime",
 ]
