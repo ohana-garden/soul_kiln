@@ -32,6 +32,16 @@ def init():
     click.echo("Creating virtue anchors (foundation + aspirational)...")
     init_virtues()
 
+    # Initialize core schema (Entity, Proxy, Community)
+    click.echo("Initializing core entity schema...")
+    try:
+        from ..core.graph_store import get_core_store
+        store = get_core_store()
+        store.init_schema()
+        click.echo("Core schema initialized.")
+    except Exception as e:
+        click.echo(f"Note: Core schema init skipped: {e}")
+
     degrees = get_virtue_degrees()
     click.echo(f"Virtue degrees: {degrees}")
     click.echo("Done.")
@@ -1198,3 +1208,173 @@ def session(session_id, user_id, community):
     # End session
     summary = theatre.end_session()
     click.echo(f"\nSession ended. Turns: {summary.get('total_turns', 0)}")
+
+
+@cli.command()
+@click.option("--user", "user_id", default="cli_user", help="User ID for the creator")
+def create(user_id):
+    """Create a new proxy through conversation.
+
+    Guides you through creating a personified voice for:
+    - Yourself
+    - Another person (family, colleague, historical figure)
+    - An organization (nonprofit, company, team)
+    - A concept (justice, creativity, your future self)
+    - Something else (a place, a project, a memory)
+
+    The proxy will join a community where members share everything.
+    """
+    from ..core.creation import ProxyCreator
+    from ..core.graph_store import get_core_store
+
+    # Initialize schema
+    store = get_core_store()
+    try:
+        store.init_schema()
+    except Exception as e:
+        click.echo(f"Note: Could not initialize schema: {e}")
+
+    click.echo("=== CREATE A NEW PROXY ===")
+    click.echo(f"Creator: {user_id}")
+    click.echo("-" * 50)
+    click.echo("")
+
+    # Start creation flow
+    creator = ProxyCreator(creator_id=user_id, store=store)
+    response = creator.start()
+    click.echo(response)
+    click.echo("")
+
+    # Interactive loop
+    while not creator.is_complete:
+        try:
+            user_input = click.prompt("You", prompt_suffix="> ")
+        except (EOFError, KeyboardInterrupt):
+            click.echo("\nCreation cancelled.")
+            return
+
+        if user_input.lower() in ("/quit", "/exit", "/cancel"):
+            click.echo("Creation cancelled.")
+            return
+
+        response = creator.process(user_input)
+        click.echo("")
+        click.echo(response)
+        click.echo("")
+
+    # Show what was created
+    if creator.state.proxy:
+        click.echo("-" * 50)
+        click.echo("Created:")
+        click.echo(f"  Proxy: {creator.state.proxy.name} ({creator.state.proxy.id})")
+        click.echo(f"  Entity: {creator.state.entity.name} ({creator.state.entity.type.value})")
+        click.echo(f"  Community: {creator.state.community_name}")
+        click.echo("")
+        click.echo("Use 'session' command to start a conversation with your proxy.")
+
+
+@cli.command()
+def communities():
+    """List all communities."""
+    from ..core.graph_store import get_core_store
+
+    store = get_core_store()
+    try:
+        comms = store.list_communities()
+    except Exception as e:
+        click.echo(f"Error listing communities: {e}")
+        click.echo("Make sure the graph database is running.")
+        return
+
+    if not comms:
+        click.echo("No communities yet.")
+        click.echo("Use 'create' command to create a proxy and community.")
+        return
+
+    click.echo("\n=== COMMUNITIES ===\n")
+    for comm in comms:
+        click.echo(f"  {comm.name} ({comm.id})")
+        click.echo(f"    Purpose: {comm.purpose.value}")
+        click.echo(f"    Members: {comm.member_count}")
+        click.echo(f"    Lessons shared: {comm.total_lessons_shared}")
+        click.echo("")
+
+
+@cli.command()
+@click.argument("community_name")
+def community(community_name):
+    """Show details of a community and its members."""
+    from ..core.graph_store import get_core_store
+    from ..core.sharing import get_sharing
+
+    store = get_core_store()
+    comm = store.get_community_by_name(community_name)
+
+    if not comm:
+        click.echo(f"Community '{community_name}' not found.")
+        return
+
+    click.echo(f"\n=== {comm.name.upper()} ===\n")
+    click.echo(f"ID: {comm.id}")
+    click.echo(f"Purpose: {comm.purpose.value}")
+    click.echo(f"Description: {comm.description}")
+    click.echo(f"Created by: {comm.creator_id}")
+    click.echo(f"Active: {comm.active}")
+    click.echo("")
+
+    click.echo("Stats:")
+    click.echo(f"  Current members: {comm.member_count}")
+    click.echo(f"  Total members ever: {comm.total_members_ever}")
+    click.echo(f"  Lessons shared: {comm.total_lessons_shared}")
+    click.echo(f"  Conversations: {comm.total_conversations}")
+    click.echo("")
+
+    # Get members
+    if comm.member_ids:
+        click.echo("Members:")
+        for proxy_id in list(comm.member_ids)[:10]:
+            proxy = store.get_proxy(proxy_id)
+            if proxy:
+                click.echo(f"  - {proxy.name} ({proxy.status.value})")
+        if len(comm.member_ids) > 10:
+            click.echo(f"  ... and {len(comm.member_ids) - 10} more")
+        click.echo("")
+
+    # Get collective wisdom
+    sharing = get_sharing()
+    wisdom = sharing.get_community_wisdom(comm.id)
+    if wisdom.get("patterns"):
+        click.echo(f"Shared patterns: {len(wisdom['patterns'])}")
+    if wisdom.get("recent_lessons"):
+        click.echo(f"Recent lessons: {len(wisdom['recent_lessons'])}")
+
+
+@cli.command()
+@click.option("--user", "user_id", default="cli_user", help="User ID")
+def proxies(user_id):
+    """List proxies created by a user."""
+    from ..core.graph_store import get_core_store
+
+    store = get_core_store()
+    try:
+        user_proxies = store.get_proxies_by_creator(user_id)
+    except Exception as e:
+        click.echo(f"Error listing proxies: {e}")
+        return
+
+    if not user_proxies:
+        click.echo(f"No proxies created by {user_id}.")
+        click.echo("Use 'create' command to create a proxy.")
+        return
+
+    click.echo(f"\n=== PROXIES by {user_id} ===\n")
+    for proxy in user_proxies:
+        entity = store.get_entity(proxy.entity_id)
+        entity_name = entity.name if entity else "Unknown"
+
+        click.echo(f"  {proxy.name}")
+        click.echo(f"    ID: {proxy.id}")
+        click.echo(f"    Status: {proxy.status.value}")
+        click.echo(f"    Represents: {entity_name}")
+        click.echo(f"    Communities: {', '.join(proxy.community_ids) or 'None'}")
+        click.echo("")
