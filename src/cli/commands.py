@@ -1039,3 +1039,162 @@ def list_saved():
     for sit in saved:
         click.echo(f"  {sit['id']}: {sit['name']}")
         click.echo(f"    {sit['stakeholder_count']} stakeholders, {sit['resource_count']} resources")
+
+
+# ============================================================================
+# THEATRE SESSION COMMANDS
+# ============================================================================
+
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Host to bind to")
+@click.option("--port", default=8000, help="Port to listen on")
+@click.option("--reload", is_flag=True, help="Enable auto-reload for development")
+def theatre(host, port, reload):
+    """Start the conversational theatre server.
+
+    Launches a WebSocket server for interactive AI conversations.
+    Connect via ws://<host>:<port>/ws/<session_id>?user_id=<user>
+
+    REST endpoints:
+      GET  /sessions          - List active sessions
+      POST /sessions          - Create new session
+      GET  /sessions/{id}     - Get session details
+      DELETE /sessions/{id}   - Close session
+      GET  /health            - Server health check
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        click.echo("Error: Theatre dependencies not installed.")
+        click.echo("Install with: pip install -e '.[theatre]'")
+        return
+
+    from ..transport.server import TransportServer, create_fastapi_app
+
+    click.echo("=== SOUL KILN THEATRE ===")
+    click.echo(f"Starting conversational theatre on {host}:{port}")
+    click.echo("")
+    click.echo("Endpoints:")
+    click.echo(f"  WebSocket: ws://{host}:{port}/ws/<session_id>?user_id=<user>")
+    click.echo(f"  REST API:  http://{host}:{port}/sessions")
+    click.echo(f"  Health:    http://{host}:{port}/health")
+    click.echo("")
+    click.echo("Press Ctrl+C to stop")
+    click.echo("-" * 50)
+
+    server = TransportServer()
+    app = create_fastapi_app(server)
+
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )
+
+
+@cli.command()
+@click.argument("session_id", required=False)
+@click.option("--user", "user_id", default="cli_user", help="User ID for the session")
+@click.option("--community", default=None, help="Community/domain to join (e.g., grant-getter)")
+def session(session_id, user_id, community):
+    """Start an interactive theatre session (CLI mode).
+
+    Creates a local theatre session for testing without a server.
+    Useful for development and debugging.
+    """
+    import uuid
+    from ..theatre.integration import TheatreSystem, TheatreConfig
+
+    session_id = session_id or f"cli_{uuid.uuid4().hex[:8]}"
+
+    click.echo("=== INTERACTIVE THEATRE SESSION ===")
+    click.echo(f"Session: {session_id}")
+    click.echo(f"User: {user_id}")
+    if community:
+        click.echo(f"Community: {community}")
+    click.echo("")
+    click.echo("Type your message and press Enter.")
+    click.echo("Commands: /quit, /view, /stats, /switch <community>")
+    click.echo("-" * 50)
+
+    # Create theatre system
+    config = TheatreConfig(
+        enable_emotions=False,  # No Hume API in CLI mode
+        enable_scene_generation=False,
+    )
+    theatre = TheatreSystem.create(config=config)
+
+    # Start session
+    result = theatre.start_session(
+        human_id=user_id,
+        community=community,
+    )
+    click.echo(f"Session started: {result['session_id']}")
+    click.echo(f"View: {result['view']}")
+    click.echo("")
+
+    # Interactive loop
+    while True:
+        try:
+            user_input = click.prompt("You", prompt_suffix="> ")
+        except (EOFError, KeyboardInterrupt):
+            click.echo("\nEnding session...")
+            break
+
+        # Handle commands
+        if user_input.startswith("/"):
+            cmd_parts = user_input[1:].split(maxsplit=1)
+            cmd = cmd_parts[0].lower()
+            arg = cmd_parts[1] if len(cmd_parts) > 1 else None
+
+            if cmd == "quit" or cmd == "exit":
+                click.echo("Ending session...")
+                break
+            elif cmd == "view":
+                state = theatre.get_display_state()
+                click.echo(f"View: {state.get('view_type', 'unknown')}")
+                click.echo(f"Theatre state: {state.get('theatre_state', 'unknown')}")
+            elif cmd == "stats":
+                stats = theatre.get_stats()
+                click.echo(f"Stats: {stats}")
+            elif cmd == "switch" and arg:
+                result = theatre.switch_community(arg)
+                click.echo(f"Switched to: {result['community']} ({result['agent_name']})")
+            elif cmd == "toggle":
+                result = theatre.toggle_view()
+                click.echo(f"View: {result.get('view_type', 'toggled')}")
+            else:
+                click.echo(f"Unknown command: {cmd}")
+            continue
+
+        # Process input through theatre
+        result = theatre.process(user_input)
+
+        # Display turns
+        for turn in result.get("turns", []):
+            role = turn.get("role", "unknown")
+            content = turn.get("content", "")
+            speaker = turn.get("speaker_name", role)
+
+            if role == "user_proxy":
+                click.echo(f"  [Proxy] {content}")
+            elif role == "builder":
+                click.echo(f"  [Builder] {content}")
+            elif role == "domain_agent":
+                click.echo(f"  [{speaker}] {content}")
+            else:
+                click.echo(f"  [{role}] {content}")
+
+        # Show topic if shifted
+        topic = result.get("topic_state")
+        if topic and topic.get("shift_detected"):
+            click.echo(f"  (Topic: {topic.get('current_region', 'unknown')})")
+
+        click.echo("")
+
+    # End session
+    summary = theatre.end_session()
+    click.echo(f"\nSession ended. Turns: {summary.get('total_turns', 0)}")
