@@ -31,8 +31,8 @@ class ContextState(str, Enum):
 
 
 @dataclass
-class DeferredTask:
-    """A task scheduled for deferred execution."""
+class ContextTask:
+    """A simple task scheduled for deferred execution within a context."""
 
     id: str
     func: Callable
@@ -66,7 +66,7 @@ class AgentContext:
     last_activity: datetime = field(default_factory=datetime.utcnow)
     pause_until: datetime | None = None
     intervention_queue: list[str] = field(default_factory=list)
-    deferred_tasks: list[DeferredTask] = field(default_factory=list)
+    deferred_tasks: list[ContextTask] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
     # Performance tracking
@@ -217,7 +217,7 @@ class AgentContext:
             Task ID
         """
         with self._lock:
-            task = DeferredTask(
+            task = ContextTask(
                 id=f"task_{uuid.uuid4().hex[:8]}",
                 func=func,
                 args=args,

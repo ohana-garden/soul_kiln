@@ -12,19 +12,22 @@ Provides advanced agent capabilities inspired by Vessels3:
 - LLM model wrappers with rate limiting
 """
 
-from .memory import SemanticMemory, MemoryEntry
-from .agents import AgentContext, InterventionManager, SubordinateManager
+from .memory import SemanticMemory, MemoryEntry, MemoryStore
+from .agents import AgentContext, ContextRegistry, InterventionManager, SubordinateManager
 from .scheduler import TaskScheduler, ScheduledTask, TaskType
-from .tools import CodeExecutor, DocumentQuery, A2AChat, BehaviorAdjuster
+from .tools import CodeExecutor, DocumentQuery, A2AChat, BehaviorAdjuster, BehaviorProfile, BehaviorDimension
 from .models import ModelWrapper, ChatGenerationResult, ModelConfig
 from .runtime import DeferredTaskManager, SessionManager
+from .integration import VesselsIntegration, get_integration, initialize_vessels
 
 __all__ = [
     # Memory
     "SemanticMemory",
     "MemoryEntry",
+    "MemoryStore",
     # Agents
     "AgentContext",
+    "ContextRegistry",
     "InterventionManager",
     "SubordinateManager",
     # Scheduler
@@ -36,6 +39,8 @@ __all__ = [
     "DocumentQuery",
     "A2AChat",
     "BehaviorAdjuster",
+    "BehaviorProfile",
+    "BehaviorDimension",
     # Models
     "ModelWrapper",
     "ChatGenerationResult",
@@ -43,4 +48,8 @@ __all__ = [
     # Runtime
     "DeferredTaskManager",
     "SessionManager",
+    # Integration
+    "VesselsIntegration",
+    "get_integration",
+    "initialize_vessels",
 ]

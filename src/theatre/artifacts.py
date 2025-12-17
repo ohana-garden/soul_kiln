@@ -282,7 +282,7 @@ class KBArtifactRetriever:
 
             try:
                 # Get outgoing edges from concept
-                edges = self._substrate.get_edges_from(concept_id)
+                edges = self._substrate.get_outgoing_edges(concept_id)
 
                 for edge in edges:
                     # Check if edge type is an artifact edge

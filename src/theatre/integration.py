@@ -36,7 +36,7 @@ from .orchestrator import (
 )
 from .captions import CaptionRenderer, Caption, get_caption_renderer
 from .hume_integration import HumeIntegration, EmotionalState, get_hume_integration
-from .artifacts import ArtifactCurator, Artifact, ArtifactRequest, get_artifact_curator
+from .artifacts import ArtifactCurator, Artifact, ArtifactType, get_artifact_curator
 from .graph_view import GraphViewRenderer, get_graph_view_renderer
 from .views import ViewManager, ViewType, ViewState, get_view_manager
 
@@ -237,7 +237,7 @@ class TheatreSystem:
 
             # Auto-surface relevant artifacts
             if self.config.enable_artifacts:
-                self.artifact_curator.surface_from_topic(topic_state)
+                self.artifact_curator.surface_for_topic(topic_state)
 
     def _on_artifact_surface(self, artifact: Artifact) -> None:
         """Handle artifact surface events."""
@@ -438,22 +438,23 @@ class TheatreSystem:
         Returns:
             Artifact info if surfaced, None otherwise
         """
-        from .artifacts import ArtifactType, ArtifactRequest
-
         type_hint = None
         if artifact_type:
             type_hint = ArtifactType(artifact_type)
 
-        request = ArtifactRequest(
-            context=context,
-            type_hint=type_hint,
-            topic_state=self.topic_detector.current_state,
-            concepts=self.topic_detector.current_state.active_concepts[:5]
-            if self.topic_detector.current_state
-            else [],
-        )
+        # Get active concepts from topic state
+        concepts = []
+        if self.topic_detector.current_state:
+            concepts = self.topic_detector.current_state.active_concepts[:5]
 
-        artifact = self.artifact_curator.request_artifact(request)
+        if not concepts:
+            return None
+
+        artifact = self.artifact_curator.request_artifact(
+            concepts=concepts,
+            artifact_type=type_hint,
+            context=context,
+        )
         if artifact:
             return artifact.to_dict()
         return None
