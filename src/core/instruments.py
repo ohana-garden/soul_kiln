@@ -834,6 +834,64 @@ def record_interaction(
 # =============================================================================
 
 
+def process_conversation(
+    entity_id: str,
+    topics: list[str],
+    partner_types: list[str] | None = None,
+) -> Result:
+    """
+    Process a conversation and trigger developmental signals.
+
+    Uses DevelopmentalManager to map topics to entity types
+    and add appropriate differentiation signals.
+    """
+    from .development import get_dev_manager
+
+    try:
+        manager = get_dev_manager()
+        manager.process_conversation(
+            entity_id=entity_id,
+            topics=topics,
+            partner_types=partner_types,
+        )
+        return Result(
+            success=True,
+            data={"entity_id": entity_id, "topics": topics},
+            operation="process_conversation",
+        )
+    except Exception as e:
+        return Result(success=False, error=str(e), operation="process_conversation")
+
+
+def process_virtue(
+    entity_id: str,
+    virtue_name: str,
+    activation_strength: float = 0.15,
+) -> Result:
+    """
+    Process a virtue activation and trigger developmental signals.
+
+    Uses DevelopmentalManager to map virtues to entity types
+    and add appropriate differentiation signals.
+    """
+    from .development import get_dev_manager
+
+    try:
+        manager = get_dev_manager()
+        manager.process_virtue_activation(
+            entity_id=entity_id,
+            virtue_name=virtue_name,
+            activation_strength=activation_strength,
+        )
+        return Result(
+            success=True,
+            data={"entity_id": entity_id, "virtue": virtue_name, "strength": activation_strength},
+            operation="process_virtue",
+        )
+    except Exception as e:
+        return Result(success=False, error=str(e), operation="process_virtue")
+
+
 def fuse_agents(
     agent_ids: list[str],
     fused_name: str,

@@ -91,6 +91,8 @@ from .instruments import (
     metamorphose_agent,
     spawn_offspring,
     fuse_agents,
+    process_conversation,
+    process_virtue,
 )
 
 __all__ = [
@@ -171,4 +173,6 @@ __all__ = [
     "metamorphose_agent",
     "spawn_offspring",
     "fuse_agents",
+    "process_conversation",
+    "process_virtue",
 ]
