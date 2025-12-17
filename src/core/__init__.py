@@ -93,6 +93,13 @@ from .instruments import (
     fuse_agents,
     process_conversation,
     process_virtue,
+    # Context building (for A0 LLM calls)
+    get_agent_state,
+    get_developmental_state,
+    get_virtue_profile,
+    get_recent_memories,
+    get_recent_interactions,
+    build_agent_context,
 )
 
 __all__ = [
@@ -175,4 +182,11 @@ __all__ = [
     "fuse_agents",
     "process_conversation",
     "process_virtue",
+    # Context building (for A0 LLM calls)
+    "get_agent_state",
+    "get_developmental_state",
+    "get_virtue_profile",
+    "get_recent_memories",
+    "get_recent_interactions",
+    "build_agent_context",
 ]

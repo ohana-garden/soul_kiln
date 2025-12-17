@@ -943,3 +943,337 @@ def fuse_agents(
         },
         operation="fuse_agents",
     )
+
+
+# =============================================================================
+# CONTEXT BUILDING (for A0 LLM calls)
+# =============================================================================
+
+
+def get_agent_state(agent_id: str) -> Result:
+    """
+    Get complete agent state from the graph.
+
+    Returns entity type, name, life stage, community membership, status.
+    This is the "who am I" context for A0 to inject into LLM prompts.
+    """
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})<-[:NAVIGATES]-(p:Proxy)-[:PROXY_FOR]->(e:Entity)
+        OPTIONAL MATCH (p)-[:MEMBER_OF]->(c:Community)
+        RETURN e.id, e.type, e.name, e.description, e.life_stage,
+               p.id, p.name, p.status,
+               a.type, a.status, a.generation, a.coherence_score,
+               collect(c.id), collect(c.name)
+        """,
+        params={"agent_id": agent_id},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_agent_state")
+
+    if not result.data:
+        return Result(success=False, error=f"Agent not found: {agent_id}", operation="get_agent_state")
+
+    row = result.data[0]
+    communities = []
+    if row[12] and row[13]:
+        for cid, cname in zip(row[12], row[13]):
+            if cid:
+                communities.append({"id": cid, "name": cname})
+
+    return Result(
+        success=True,
+        data={
+            "agent_id": agent_id,
+            "entity": {
+                "id": row[0],
+                "type": row[1],
+                "name": row[2],
+                "description": row[3],
+                "life_stage": row[4],
+            },
+            "proxy": {
+                "id": row[5],
+                "name": row[6],
+                "status": row[7],
+            },
+            "agent": {
+                "type": row[8],
+                "status": row[9],
+                "generation": row[10],
+                "coherence_score": row[11],
+            },
+            "communities": communities,
+        },
+        operation="get_agent_state",
+    )
+
+
+def get_developmental_state(entity_id: str) -> Result:
+    """
+    Get developmental state including differentiation pressure and crystallization readiness.
+
+    This tells A0 "where am I in my development" - essential for
+    understanding behavioral expectations (seed vs juvenile vs adult).
+    """
+    # Get all differentiation signals
+    signals_result = get_differentiation_signals(entity_id)
+    signals = signals_result.data or [] if signals_result.success else []
+
+    # Calculate type pressure
+    type_pressure: dict[str, float] = {}
+    for s in signals:
+        ttype = s["target_type"]
+        type_pressure[ttype] = type_pressure.get(ttype, 0) + s["strength"]
+
+    # Find dominant type and check crystallization
+    crystallization_threshold = 1.0
+    dominant_type = None
+    dominant_pressure = 0.0
+    ready_to_crystallize = False
+
+    for ttype, pressure in type_pressure.items():
+        if pressure > dominant_pressure:
+            dominant_type = ttype
+            dominant_pressure = pressure
+        if pressure >= crystallization_threshold:
+            ready_to_crystallize = True
+
+    # Get current life stage
+    entity_result = get_entity(entity_id)
+    current_type = None
+    current_life_stage = None
+    if entity_result.success and entity_result.data:
+        # Result data structure varies, handle both dict and list
+        if hasattr(entity_result.data, 'get'):
+            current_type = entity_result.data.get("type")
+            current_life_stage = entity_result.data.get("life_stage")
+        elif isinstance(entity_result.data, (list, tuple)) and len(entity_result.data) > 0:
+            # Handle raw cypher result
+            pass
+
+    return Result(
+        success=True,
+        data={
+            "entity_id": entity_id,
+            "current_type": current_type,
+            "current_life_stage": current_life_stage,
+            "total_signals": len(signals),
+            "type_pressure": type_pressure,
+            "dominant_type": dominant_type,
+            "dominant_pressure": dominant_pressure,
+            "ready_to_crystallize": ready_to_crystallize,
+            "crystallization_threshold": crystallization_threshold,
+        },
+        operation="get_developmental_state",
+    )
+
+
+def get_virtue_profile(agent_id: str, limit: int = 20) -> Result:
+    """
+    Get an agent's virtue activation history and profile.
+
+    Returns dominant virtues, activation patterns. This tells A0
+    "what virtues does this agent embody" for personality/values context.
+    """
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:ACTIVATED]->(act:VirtueActivation)-[:OF_VIRTUE]->(v:VirtueAnchor)
+        RETURN v.id, v.name, act.activation, act.context, act.timestamp
+        ORDER BY act.timestamp DESC
+        LIMIT $limit
+        """,
+        params={"agent_id": agent_id, "limit": limit},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_virtue_profile")
+
+    activations = []
+    virtue_totals: dict[str, float] = {}
+    virtue_counts: dict[str, int] = {}
+
+    for row in result.data or []:
+        virtue_id = row[0]
+        virtue_name = row[1]
+        activation_val = row[2] or 0.0
+
+        activations.append({
+            "virtue_id": virtue_id,
+            "virtue_name": virtue_name,
+            "activation": activation_val,
+            "context": row[3],
+            "timestamp": row[4],
+        })
+
+        virtue_totals[virtue_name] = virtue_totals.get(virtue_name, 0) + activation_val
+        virtue_counts[virtue_name] = virtue_counts.get(virtue_name, 0) + 1
+
+    # Calculate dominant virtues
+    virtue_scores = []
+    for vname, total in virtue_totals.items():
+        count = virtue_counts[vname]
+        avg = total / count if count > 0 else 0
+        virtue_scores.append({
+            "virtue": vname,
+            "total_activation": total,
+            "activation_count": count,
+            "average_activation": avg,
+        })
+
+    # Sort by total activation
+    virtue_scores.sort(key=lambda x: x["total_activation"], reverse=True)
+
+    return Result(
+        success=True,
+        data={
+            "agent_id": agent_id,
+            "recent_activations": activations,
+            "virtue_profile": virtue_scores[:5],  # Top 5 virtues
+            "total_virtue_activations": len(activations),
+        },
+        operation="get_virtue_profile",
+    )
+
+
+def get_recent_memories(agent_id: str, limit: int = 10) -> Result:
+    """
+    Get recent memories for context.
+
+    Short wrapper around get_memories for context building.
+    """
+    return get_memories(agent_id=agent_id, limit=limit)
+
+
+def get_recent_interactions(agent_id: str, limit: int = 10) -> Result:
+    """
+    Get recent interactions for context.
+
+    Returns interaction history for A0 to understand recent activity.
+    """
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})-[:HAD]->(i:Interaction)
+        RETURN i.id, i.type, i.content, i.partner_id, i.topics, i.timestamp
+        ORDER BY i.timestamp DESC
+        LIMIT $limit
+        """,
+        params={"agent_id": agent_id, "limit": limit},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_recent_interactions")
+
+    interactions = []
+    for row in result.data or []:
+        interactions.append({
+            "id": row[0],
+            "type": row[1],
+            "content": row[2],
+            "partner_id": row[3],
+            "topics": row[4],
+            "timestamp": row[5],
+        })
+
+    return Result(success=True, data=interactions, operation="get_recent_interactions")
+
+
+def build_agent_context(agent_id: str, include_memories: bool = True, include_virtues: bool = True) -> Result:
+    """
+    Build complete domain context for A0 to inject into LLM prompts.
+
+    This is the main function A0 calls before generating a response.
+    It assembles everything soul_kiln knows about this agent into
+    a formatted string that provides domain understanding.
+
+    Returns a structured context dict and a formatted prompt string.
+    """
+    # Get agent state
+    state_result = get_agent_state(agent_id)
+    if not state_result.success:
+        return Result(success=False, error=f"Could not get agent state: {state_result.error}", operation="build_agent_context")
+
+    state = state_result.data
+
+    # Get developmental state
+    dev_result = get_developmental_state(state["entity"]["id"])
+    dev_state = dev_result.data if dev_result.success else None
+
+    # Get virtue profile
+    virtue_profile = None
+    if include_virtues:
+        virtue_result = get_virtue_profile(agent_id)
+        virtue_profile = virtue_result.data if virtue_result.success else None
+
+    # Get recent memories
+    memories = None
+    if include_memories:
+        mem_result = get_recent_memories(agent_id, limit=5)
+        memories = mem_result.data if mem_result.success else None
+
+    # Get recent interactions
+    interactions_result = get_recent_interactions(agent_id, limit=5)
+    interactions = interactions_result.data if interactions_result.success else None
+
+    # Build formatted context string for LLM
+    context_parts = []
+
+    # Identity section
+    entity = state["entity"]
+    context_parts.append(f"## Identity")
+    context_parts.append(f"Name: {entity['name']}")
+    context_parts.append(f"Type: {entity['type']}")
+    if entity['description']:
+        context_parts.append(f"Description: {entity['description']}")
+    if entity['life_stage']:
+        context_parts.append(f"Life Stage: {entity['life_stage']}")
+
+    # Community section
+    if state["communities"]:
+        context_parts.append(f"\n## Communities")
+        for comm in state["communities"]:
+            context_parts.append(f"- {comm['name']}")
+
+    # Developmental section
+    if dev_state:
+        context_parts.append(f"\n## Developmental State")
+        context_parts.append(f"Current type: {dev_state['current_type'] or 'undifferentiated'}")
+        if dev_state['dominant_type']:
+            context_parts.append(f"Trending toward: {dev_state['dominant_type']} (pressure: {dev_state['dominant_pressure']:.2f})")
+        if dev_state['ready_to_crystallize']:
+            context_parts.append("Ready for crystallization (type differentiation)")
+
+    # Virtue section
+    if virtue_profile and virtue_profile.get("virtue_profile"):
+        context_parts.append(f"\n## Virtue Profile")
+        for v in virtue_profile["virtue_profile"][:3]:
+            context_parts.append(f"- {v['virtue']}: {v['average_activation']:.2f} avg activation")
+
+    # Recent memories
+    if memories and isinstance(memories, list) and len(memories) > 0:
+        context_parts.append(f"\n## Recent Memories")
+        for m in memories[:3]:
+            context_parts.append(f"- [{m['type']}] {m['content'][:100]}...")
+
+    # Recent interactions
+    if interactions and len(interactions) > 0:
+        context_parts.append(f"\n## Recent Interactions")
+        for i in interactions[:3]:
+            context_parts.append(f"- [{i['type']}] {i['content'][:80]}...")
+
+    formatted_context = "\n".join(context_parts)
+
+    return Result(
+        success=True,
+        data={
+            "agent_id": agent_id,
+            "state": state,
+            "developmental_state": dev_state,
+            "virtue_profile": virtue_profile,
+            "memories": memories,
+            "interactions": interactions,
+            "formatted_context": formatted_context,
+        },
+        operation="build_agent_context",
+    )
