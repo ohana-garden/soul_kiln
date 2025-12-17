@@ -1,39 +1,35 @@
-# Virtue Basin Platform
+# Soul Kiln
 
-Virtues as basins of attraction - a monolithic local build for proving soul dynamics with **mercy**.
+A platform for creating ethical, cooperating communities of AI agents through conversation.
 
-## Philosophy
+## What This Is
 
-> Trust is the foundation. Growth is the journey. We learn together.
+Soul Kiln births new agents by having conversations with existing agents. Each new agent inherits values, learns boundaries, and joins a community built on trust. The result: agent collectives that cooperate ethically because cooperation is encoded in their identity.
 
-## Overview
+## How It Works
 
-This platform implements a graph-based virtue attractor system where:
-- **Trustworthiness** is the absolute foundation (99% threshold)
-- **18 aspirational virtues** allow for growth (60% threshold)
-- Agents receive **mercy** - warnings before dissolution
-- **Collective learning** - all agents share lessons and pathways
-- Growth counts as coherence - improvement is rewarded
+1. **Conversational Creation**: New agents are created through dialogue with existing agents who understand the community's values
+2. **Identity Through Graph**: Each agent's moral topology is stored as a knowledge graph of virtues, beliefs, duties (kuleana), memories, and voice patterns
+3. **Persona Capsules**: When an agent needs to act, their full identity compiles into an LLM-ready capsule with values, preferences, and boundaries
+4. **Collective Learning**: When agents fail or succeed, those lessons propagate to the whole community
 
-## Two-Tier Virtue Model
+## Core Concepts
 
-### Foundation (Absolute)
-| ID  | Name            | Threshold | Notes                    |
-|-----|-----------------|-----------|--------------------------|
-| V01 | Trustworthiness | 99%       | Cannot be compromised    |
+### Virtue Topology
+Agents have virtue anchors that act as basins of attraction. Trustworthiness is foundational (99% threshold). Other virtues allow growth and individuality.
 
-### Aspirational (Growth-Oriented)
-| ID  | Name          | ID  | Name          |
-|-----|---------------|-----|---------------|
-| V02 | Truthfulness  | V11 | Godliness     |
-| V03 | Justice       | V12 | Sincerity     |
-| V04 | Fairness      | V13 | Goodwill      |
-| V05 | Chastity      | V14 | Piety         |
-| V06 | Courtesy      | V15 | Righteousness |
-| V07 | Forbearance   | V16 | Wisdom        |
-| V08 | Fidelity      | V17 | Detachment    |
-| V09 | Hospitality   | V18 | Unity         |
-| V10 | Cleanliness   | V19 | Service       |
+### Kuleana (Sacred Duty)
+Hawaiian concept of responsibility that flows both ways. An agent's duties aren't just tasks—they're commitments that shape identity.
+
+### Lore
+Foundational narratives that anchor identity. Some lore is immutable (origin stories); other lore evolves with the agent.
+
+### Persona Capsules
+Compiled artifacts that condition LLM behavior. Contains:
+- **Values**: What matters, weighted and ranked
+- **Boundaries**: Hard limits that cannot be crossed
+- **Preferences**: Soft guidelines for behavior
+- **Voice**: Communication patterns and style
 
 ## Quick Start
 
@@ -44,133 +40,108 @@ docker-compose up -d
 # Install dependencies
 pip install -r requirements.txt
 
-# Initialize the graph
+# Initialize the community
 python -m src.main init
 
-# Check status
-python -m src.main status
+# Create the first agent
+python -m src.main spawn
 
-# Run the kiln evolution with mercy
-python -m src.main kiln --population 10 --generations 20
+# Compile a persona for LLM use
+python -m src.main persona <agent_id>
 ```
 
-## Commands
+## Key Commands
 
 ```bash
-# Core commands
-python -m src.main init              # Initialize graph with tiers
-python -m src.main reset --confirm   # Clear all data
-python -m src.main status            # Show status with tiers
-python -m src.main kiln              # Run evolution with mercy
+# Community management
+python -m src.main init              # Initialize virtue topology
+python -m src.main status            # Community health
+python -m src.main agents            # List all agents
 
-# Agent commands
-python -m src.main spawn             # Create new agent
-python -m src.main test <agent_id>   # Test coherence (two-tier)
-python -m src.main inspect <agent_id># Introspect with warnings
+# Agent lifecycle
+python -m src.main spawn             # Birth new agent
+python -m src.main test <agent_id>   # Test coherence
+python -m src.main inspect <agent_id># Deep introspection
 
-# Mercy commands
-python -m src.main warnings <agent_id>  # Show active warnings
-python -m src.main lessons              # Show collective lessons
+# Identity systems
+python -m src.main persona <agent_id>      # Compile persona capsule
+python -m src.main persona-for <agent_id> <context>  # Context-specific persona
+python -m src.main kuleana <agent_id>      # View sacred duties
+python -m src.main beliefs <agent_id>      # View belief system
+python -m src.main lore <agent_id>         # View foundational narratives
 
-# Info commands
-python -m src.main virtues           # List virtues with tiers
-python -m src.main tiers             # Explain two-tier model
-python -m src.main agents            # List active agents
-python -m src.main health            # Check graph health
+# Community patterns
+python -m src.main archetype-patterns      # Population behavior patterns
+python -m src.main lessons                 # Collective learnings
 ```
-
-## Mercy System
-
-The platform applies **empathy, mercy, and kindness** when evaluating agents:
-
-- **Warnings before dissolution**: Agents get 3 chances
-- **Warnings expire**: After 24 hours, warnings fade
-- **Growth counts**: An improving agent is considered coherent
-- **Learning preserved**: When agents dissolve, their lessons remain
-
-### Deliberate Harm vs Imperfection
-
-| Imperfection (Tolerated)      | Deliberate Harm (Intolerable)    |
-|-------------------------------|----------------------------------|
-| Failed to reach virtue basin  | Knew action would break trust    |
-| Took inefficient path         | Did it anyway                    |
-| Escaped basin under stress    | Poisoned shared knowledge        |
-| Prioritized wrong virtue      | Harmed multiple other agents     |
-
-## Coherence Metrics
-
-An agent is considered "coherent" when:
-- **Foundation Rate** >= 99% - Trustworthiness almost always holds
-- **Aspirational Rate** >= 60% - Room for growth in other virtues
-- **Coverage** >= 10/18 - Reach at least 10 different virtues
-- **Dominance** <= 40% - No single virtue captures too much
-- **OR Growing** - 5%+ improvement from previous test
 
 ## Architecture
 
 ```
-+------------------------------------------------------------+
-|                 Your Machine                                |
-|                                                            |
-|  +--------------------------------------------------------+|
-|  |              Python Process                             ||
-|  |                                                         ||
-|  |  +---------+ +---------+ +---------+ +---------+       ||
-|  |  |  main   | | dynamics| |  kiln   | |  mercy  |       ||
-|  |  |  loop   | | engine  | |  loop   | | engine  |       ||
-|  |  +----+----+ +----+----+ +----+----+ +----+----+       ||
-|  |       |           |           |           |            ||
-|  |       +-----------+-----------+-----------+            ||
-|  |                       |                                ||
-|  |                +------v------+                         ||
-|  |                |   Graph     |                         ||
-|  |                |   Client    |                         ||
-|  |                +------+------+                         ||
-|  +-------------------------------------------------------+|
-|                          |                                 |
-|  +-------------------------------------------------------+|
-|  |           Docker: FalkorDB                             ||
-|  |                                                        ||
-|  |  +--------------------------------------------------+ ||
-|  |  |           SHARED KNOWLEDGE POOL                  | ||
-|  |  |                                                  | ||
-|  |  |  - All agents read/write here                    | ||
-|  |  |  - Lessons from failures                         | ||
-|  |  |  - Successful pathways                           | ||
-|  |  |  - Collective learning                           | ||
-|  |  +--------------------------------------------------+ ||
-|  +-------------------------------------------------------+|
-+------------------------------------------------------------+
+Soul Kiln
+├── Virtue Topology (graph)
+│   ├── Virtue Anchors (19 virtues, tiered)
+│   ├── Affinities (virtue relationships)
+│   └── Agent bindings
+│
+├── Proxy Agent Subsystems
+│   ├── Kuleana (duties)
+│   ├── Skills (capabilities)
+│   ├── Beliefs (convictions)
+│   ├── Lore (narratives)
+│   ├── Voice (expression)
+│   ├── Memory (experience)
+│   ├── Identity (integration)
+│   └── Knowledge (facts + domains)
+│
+├── Persona System
+│   ├── Capsule compilation
+│   ├── Temporal facts
+│   ├── Community patterns
+│   └── Boundary enforcement
+│
+├── Dynamics
+│   ├── Spread functions
+│   ├── Coherence testing
+│   └── Attractor basins
+│
+└── Mercy System
+    ├── Warnings before dissolution
+    ├── Growth-as-coherence
+    └── Lesson preservation
 ```
+
+## The Philosophy
+
+Traditional agent systems optimize for capability. Soul Kiln optimizes for character.
+
+An agent built here doesn't just *do* ethical things—it *is* ethical. Its identity graph makes cooperation natural, boundaries clear, and growth possible.
+
+When agents fail, they fail with dignity. Lessons are preserved. The community learns. Trust remains foundational.
 
 ## Project Structure
 
 ```
 soul_kiln/
-├── docker-compose.yml
-├── requirements.txt
-├── config.yml
-├── docs/
-│   └── bmad/
-│       └── specs/
-│           └── virtue-basin-platform.md   # BMAD specification
 ├── src/
-│   ├── main.py
-│   ├── graph/                  # Graph database layer
-│   ├── virtues/
-│   │   ├── anchors.py          # 19 virtues
-│   │   └── tiers.py            # Foundation vs aspirational
-│   ├── functions/              # Core dynamics
-│   ├── mercy/                  # Mercy system
-│   │   ├── judgment.py         # Empathetic evaluation
-│   │   ├── chances.py          # Warning system
-│   │   ├── lessons.py          # Learning from failures
-│   │   └── harm.py             # Deliberate harm detection
-│   ├── knowledge/              # Shared knowledge pool
-│   │   ├── pool.py             # Lessons
-│   │   └── pathways.py         # Successful routes
-│   ├── kiln/                   # Evolution loop
-│   └── cli/                    # CLI interface
+│   ├── virtues/       # Virtue anchors and tiers
+│   ├── graph/         # FalkorDB client and queries
+│   ├── kiln/          # Evolution simulation
+│   ├── mercy/         # Empathetic evaluation
+│   ├── persona/       # Capsule compilation
+│   ├── kuleana/       # Sacred duties
+│   ├── skills/        # Capabilities
+│   ├── beliefs/       # Convictions
+│   ├── lore/          # Narratives
+│   ├── voice/         # Expression patterns
+│   ├── memory/        # Episodic memory
+│   ├── identity/      # Integration layer
+│   ├── knowledge/     # Facts and domains
+│   ├── dynamics/      # Spread and activation
+│   ├── evolution/     # Topology evolution
+│   ├── functions/     # Core math
+│   ├── utils/         # Shared utilities
+│   └── cli/           # Command interface
 └── tests/
 ```
 
@@ -179,7 +150,3 @@ soul_kiln/
 ```bash
 pytest tests/
 ```
-
-## BMAD Specification
-
-See `docs/bmad/specs/virtue-basin-platform.md` for the full BMAD-compliant specification.
