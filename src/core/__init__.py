@@ -23,6 +23,16 @@ from .community import Community, CommunityPurpose, VirtueEmphasis
 from .graph_store import CoreGraphStore, get_core_store
 from .creation import ProxyCreator, CreationState, create_proxy_conversation
 from .sharing import CommunitySharing, get_sharing, share_learning
+from .seeding import (
+    EntitySeeder,
+    SeedStrategy,
+    SeedConfig,
+    SeedState,
+    get_seeder,
+    seed_curious_entity,
+    list_seed_templates,
+    SEED_TEMPLATES,
+)
 
 __all__ = [
     # Entity
@@ -48,4 +58,13 @@ __all__ = [
     "CommunitySharing",
     "get_sharing",
     "share_learning",
+    # Seeding
+    "EntitySeeder",
+    "SeedStrategy",
+    "SeedConfig",
+    "SeedState",
+    "get_seeder",
+    "seed_curious_entity",
+    "list_seed_templates",
+    "SEED_TEMPLATES",
 ]

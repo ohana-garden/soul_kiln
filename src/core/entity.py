@@ -5,7 +5,8 @@ An entity is the thing being personified. It could be:
 - A human (yourself, a family member, a historical figure)
 - An organization (nonprofit, company, team)
 - A concept (justice, creativity, your future self)
-- An object (a place, a pet, a project)
+- A collective (ecosystem, movement, future generation)
+- Something curious (still discovering itself)
 
 The proxy speaks FOR the entity. The entity itself is the source of truth.
 """
@@ -25,21 +26,47 @@ class EntityType(str, Enum):
     HUMAN = "human"  # Another person
     PET = "pet"  # An animal companion
     DECEASED = "deceased"  # Someone who has passed
+    ANCESTOR = "ancestor"  # Ancestral lineage/wisdom
 
     # Organizations
     ORGANIZATION = "organization"  # Company, nonprofit, etc.
     TEAM = "team"  # A group within an org
     PROJECT = "project"  # A specific initiative
+    COOPERATIVE = "cooperative"  # Member-owned entity
+    COMMONS = "commons"  # Shared resource (physical or digital)
 
     # Concepts
     CONCEPT = "concept"  # An abstract idea
     FUTURE_SELF = "future_self"  # Who you want to become
     VALUE = "value"  # A principle or belief
+    MOVEMENT = "movement"  # Social/political movement
+    TRADITION = "tradition"  # Oral tradition, cultural practice
 
-    # Objects
+    # Places and nature
     PLACE = "place"  # A location with meaning
-    OBJECT = "object"  # A physical thing
+    ECOSYSTEM = "ecosystem"  # Watershed, forest, reef
+    SPECIES = "species"  # Endangered or significant species
+    LAND = "land"  # Territory, indigenous land
+
+    # Time-based
+    FUTURE_GENERATION = "future_generation"  # The unborn
     MEMORY = "memory"  # A significant experience
+    ERA = "era"  # A time period with meaning
+
+    # Collectives
+    NEIGHBORHOOD = "neighborhood"  # Local community
+    DIASPORA = "diaspora"  # Scattered but connected people
+    NETWORK = "network"  # Mutual aid, support network
+
+    # Objects and creations
+    OBJECT = "object"  # A physical thing
+    ARTIFACT = "artifact"  # Cultural/historical object
+    CODEBASE = "codebase"  # Open source project, wiki
+
+    # Curious/emergent (still discovering themselves)
+    CURIOUS = "curious"  # Doesn't know what it is yet
+    EMERGENT = "emergent"  # Becoming something through interaction
+    SEED = "seed"  # Planted to grow into something
 
 
 @dataclass

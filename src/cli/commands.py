@@ -1378,3 +1378,157 @@ def proxies(user_id):
         click.echo(f"    Represents: {entity_name}")
         click.echo(f"    Communities: {', '.join(proxy.community_ids) or 'None'}")
         click.echo("")
+
+
+# ============================================================================
+# SEEDING COMMANDS - Planting curious entities
+# ============================================================================
+
+
+@cli.command()
+def seeds():
+    """List available seed templates for curious entities."""
+    from ..core.seeding import list_seed_templates
+
+    templates = list_seed_templates()
+
+    click.echo("\n=== SEED TEMPLATES ===")
+    click.echo("Curious entities that discover themselves through interaction.\n")
+
+    for name, info in templates.items():
+        click.echo(f"  {name}")
+        click.echo(f"    Name: {info['name']}")
+        click.echo(f"    Strategy: {info['strategy']}")
+        click.echo(f"    Becomes: {info['suggested_type']}")
+        click.echo(f"    {info['description']}")
+        click.echo("")
+
+    click.echo("Use 'seed <template> --community <name>' to plant a seed.")
+
+
+@cli.command()
+@click.argument("template")
+@click.option("--community", required=True, help="Community to seed into")
+@click.option("--name", default=None, help="Override the seed's name")
+def seed(template, community, name):
+    """Seed a curious entity from a template.
+
+    Seeds are entities that don't know what they are yet.
+    They discover themselves through conversation and community.
+
+    Example:
+      seed watershed --community "River Valley Stewards"
+      seed future_generations --community "Climate Action"
+    """
+    from ..core.seeding import get_seeder, list_seed_templates
+    from ..core.graph_store import get_core_store
+
+    templates = list_seed_templates()
+    if template not in templates:
+        click.echo(f"Unknown template: {template}")
+        click.echo(f"Available: {', '.join(templates.keys())}")
+        return
+
+    store = get_core_store()
+
+    # Get or create community
+    comm = store.get_community_by_name(community)
+    if not comm:
+        click.echo(f"Community '{community}' not found. Creating it...")
+        from ..core.community import Community, CommunityPurpose
+        comm = Community(
+            name=community,
+            description=f"Community for {template} seeds",
+            purpose=CommunityPurpose.GENERAL,
+            creator_id="system",
+        )
+        store.save_community(comm)
+
+    # Seed the entity
+    seeder = get_seeder()
+    customizations = {"name": name} if name else None
+
+    try:
+        entity, proxy = seeder.seed_from_template(
+            template_name=template,
+            community_id=comm.id,
+            creator_id="system",
+            customizations=customizations,
+        )
+    except Exception as e:
+        click.echo(f"Error seeding: {e}")
+        return
+
+    click.echo(f"\n=== SEED PLANTED ===\n")
+    click.echo(f"Entity: {entity.name} ({entity.id})")
+    click.echo(f"Type: {entity.type.value}")
+    click.echo(f"Description: {entity.description}")
+    click.echo(f"Community: {comm.name}")
+    click.echo("")
+
+    # Show initial question
+    seed_config = entity.attributes.get("seed_config", {})
+    if seed_config.get("initial_prompt"):
+        click.echo(f"Initial question: \"{seed_config['initial_prompt']}\"")
+        click.echo("")
+
+    click.echo("This seed will discover itself through conversation.")
+    click.echo("Use 'session' to interact with it.")
+
+
+@cli.command()
+@click.argument("community_name")
+@click.option("--templates", default="pure_curious,witness,bridge",
+              help="Comma-separated list of templates")
+def seed_community(community_name, templates):
+    """Seed a community with multiple curious entities.
+
+    Creates a diverse set of seeds that explore together.
+
+    Example:
+      seed-community "New Community" --templates watershed,future_generations,witness
+    """
+    from ..core.seeding import get_seeder
+    from ..core.graph_store import get_core_store
+    from ..core.community import Community, CommunityPurpose
+
+    store = get_core_store()
+
+    # Get or create community
+    comm = store.get_community_by_name(community_name)
+    if not comm:
+        click.echo(f"Creating community: {community_name}")
+        comm = Community(
+            name=community_name,
+            description="A curious community",
+            purpose=CommunityPurpose.GENERAL,
+            creator_id="system",
+        )
+        store.save_community(comm)
+
+    # Parse templates
+    template_list = [t.strip() for t in templates.split(",")]
+
+    click.echo(f"\n=== SEEDING COMMUNITY: {community_name} ===\n")
+
+    seeder = get_seeder()
+    results = seeder.seed_community_with_curiosity(
+        community_id=comm.id,
+        seed_templates=template_list,
+        creator_id="system",
+    )
+
+    if not results:
+        click.echo("No seeds were planted.")
+        return
+
+    click.echo(f"Planted {len(results)} seeds:\n")
+    for entity, proxy in results:
+        seed_config = entity.attributes.get("seed_config", {})
+        click.echo(f"  {entity.name}")
+        click.echo(f"    Strategy: {seed_config.get('strategy', 'unknown')}")
+        click.echo(f"    Question: \"{seed_config.get('initial_prompt', '')}\"")
+        click.echo("")
+
+    click.echo(f"Community {community_name} now has {comm.member_count + len(results)} members.")
+    click.echo("These seeds will discover themselves through conversation.")
