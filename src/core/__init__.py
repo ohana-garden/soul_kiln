@@ -77,6 +77,14 @@ from .instruments import (
     share_lesson,
     # Virtue operations
     record_virtue_activation,
+    # Message operations (graph telepathy)
+    send_message,
+    get_messages,
+    mark_read,
+    # Memory operations (graph memory)
+    save_memory,
+    get_memories,
+    record_interaction,
     # Composite operations (A0 tools)
     spawn_agent,
     develop_agent,
@@ -149,6 +157,14 @@ __all__ = [
     "set_entity_type",
     "share_lesson",
     "record_virtue_activation",
+    # Message operations (graph telepathy)
+    "send_message",
+    "get_messages",
+    "mark_read",
+    # Memory operations (graph memory)
+    "save_memory",
+    "get_memories",
+    "record_interaction",
     # A0 tools
     "spawn_agent",
     "develop_agent",

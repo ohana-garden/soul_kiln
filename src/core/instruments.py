@@ -621,6 +621,219 @@ def spawn_offspring(
     )
 
 
+# =============================================================================
+# MESSAGE OPERATIONS (graph-based memory/telepathy)
+# =============================================================================
+
+
+def send_message(
+    from_id: str,
+    to_id: str,
+    content: str,
+    metadata: dict | None = None,
+) -> Result:
+    """Send a message between agents (stored in graph)."""
+    message_id = f"msg_{uuid.uuid4().hex[:12]}"
+
+    result = cypher(
+        query="""
+        CREATE (m:Message {
+            id: $id, content: $content, from_id: $from_id, to_id: $to_id,
+            read: false, timestamp: $timestamp, metadata: $metadata
+        })
+        WITH m
+        OPTIONAL MATCH (sender:Agent {id: $from_id})
+        OPTIONAL MATCH (recipient:Agent {id: $to_id})
+        FOREACH (_ IN CASE WHEN sender IS NOT NULL THEN [1] ELSE [] END |
+            CREATE (sender)-[:SENT]->(m)
+        )
+        FOREACH (_ IN CASE WHEN recipient IS NOT NULL THEN [1] ELSE [] END |
+            CREATE (m)-[:TO]->(recipient)
+        )
+        RETURN m.id
+        """,
+        params={
+            "id": message_id,
+            "content": content,
+            "from_id": from_id,
+            "to_id": to_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": str(metadata or {}),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="send_message")
+
+    return Result(success=True, data={"message_id": message_id}, operation="send_message")
+
+
+def get_messages(agent_id: str, unread_only: bool = True, limit: int = 50) -> Result:
+    """Get messages for an agent from graph."""
+    if unread_only:
+        query = """
+        MATCH (m:Message {to_id: $agent_id, read: false})
+        RETURN m.id, m.content, m.from_id, m.timestamp, m.metadata
+        ORDER BY m.timestamp ASC
+        LIMIT $limit
+        """
+    else:
+        query = """
+        MATCH (m:Message {to_id: $agent_id})
+        RETURN m.id, m.content, m.from_id, m.timestamp, m.metadata
+        ORDER BY m.timestamp DESC
+        LIMIT $limit
+        """
+
+    result = cypher(query=query, params={"agent_id": agent_id, "limit": limit})
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_messages")
+
+    messages = []
+    for row in result.data or []:
+        messages.append({
+            "id": row[0],
+            "content": row[1],
+            "from_id": row[2],
+            "timestamp": row[3],
+            "metadata": row[4],
+        })
+
+    return Result(success=True, data=messages, operation="get_messages")
+
+
+def mark_read(message_id: str) -> Result:
+    """Mark a message as read."""
+    result = cypher(
+        query="MATCH (m:Message {id: $id}) SET m.read = true, m.read_at = $timestamp RETURN m.id",
+        params={"id": message_id, "timestamp": datetime.utcnow().isoformat()},
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="mark_read")
+
+    return Result(success=True, data={"message_id": message_id}, operation="mark_read")
+
+
+def save_memory(
+    agent_id: str,
+    memory_type: str,
+    content: str,
+    metadata: dict | None = None,
+) -> Result:
+    """Save a memory/fact for an agent."""
+    memory_id = f"mem_{uuid.uuid4().hex[:12]}"
+
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})
+        CREATE (m:Memory {
+            id: $id, type: $type, content: $content,
+            metadata: $metadata, timestamp: $timestamp
+        })
+        CREATE (a)-[:REMEMBERS]->(m)
+        RETURN m.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "id": memory_id,
+            "type": memory_type,
+            "content": content,
+            "metadata": str(metadata or {}),
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="save_memory")
+
+    return Result(success=True, data={"memory_id": memory_id}, operation="save_memory")
+
+
+def get_memories(
+    agent_id: str,
+    memory_type: str | None = None,
+    limit: int = 100,
+) -> Result:
+    """Get memories for an agent."""
+    if memory_type:
+        query = """
+        MATCH (a:Agent {id: $agent_id})-[:REMEMBERS]->(m:Memory {type: $type})
+        RETURN m.id, m.type, m.content, m.metadata, m.timestamp
+        ORDER BY m.timestamp DESC
+        LIMIT $limit
+        """
+        params = {"agent_id": agent_id, "type": memory_type, "limit": limit}
+    else:
+        query = """
+        MATCH (a:Agent {id: $agent_id})-[:REMEMBERS]->(m:Memory)
+        RETURN m.id, m.type, m.content, m.metadata, m.timestamp
+        ORDER BY m.timestamp DESC
+        LIMIT $limit
+        """
+        params = {"agent_id": agent_id, "limit": limit}
+
+    result = cypher(query=query, params=params)
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="get_memories")
+
+    memories = []
+    for row in result.data or []:
+        memories.append({
+            "id": row[0],
+            "type": row[1],
+            "content": row[2],
+            "metadata": row[3],
+            "timestamp": row[4],
+        })
+
+    return Result(success=True, data=memories, operation="get_memories")
+
+
+def record_interaction(
+    agent_id: str,
+    interaction_type: str,
+    content: str,
+    partner_id: str | None = None,
+    topics: list[str] | None = None,
+) -> Result:
+    """Record an interaction in the graph."""
+    interaction_id = f"int_{uuid.uuid4().hex[:8]}"
+
+    result = cypher(
+        query="""
+        MATCH (a:Agent {id: $agent_id})
+        CREATE (i:Interaction {
+            id: $id, type: $type, content: $content,
+            partner_id: $partner_id, topics: $topics, timestamp: $timestamp
+        })
+        CREATE (a)-[:HAD]->(i)
+        RETURN i.id
+        """,
+        params={
+            "agent_id": agent_id,
+            "id": interaction_id,
+            "type": interaction_type,
+            "content": content,
+            "partner_id": partner_id or "",
+            "topics": topics or [],
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
+
+    if not result.success:
+        return Result(success=False, error=result.error, operation="record_interaction")
+
+    return Result(success=True, data={"interaction_id": interaction_id}, operation="record_interaction")
+
+
+# =============================================================================
+# COMPOSITE OPERATIONS (A0 tools)
+# =============================================================================
+
+
 def fuse_agents(
     agent_ids: list[str],
     fused_name: str,
