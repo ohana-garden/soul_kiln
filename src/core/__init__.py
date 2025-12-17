@@ -60,6 +60,41 @@ from .development import (
     get_dev_manager,
     TOPIC_TYPE_ASSOCIATIONS,
 )
+from .instruments import (
+    # Core classes
+    InstrumentResult,
+    Instrument,
+    InstrumentRegistry,
+    ToolResult,
+    Tool,
+    ToolRegistry,
+    # Instruments (atomic SSFs)
+    cypher,
+    create_entity,
+    get_entity,
+    create_proxy,
+    create_agent,
+    join_community,
+    add_differentiation_signal,
+    get_differentiation_signals,
+    update_life_stage,
+    set_entity_type,
+    share_lesson,
+    record_virtue_activation,
+    # Tools (collections of instruments)
+    spawn_agent,
+    develop_agent,
+    metamorphose_agent,
+    spawn_offspring,
+    fuse_agents,
+    # Convenience functions
+    list_instruments,
+    get_instrument,
+    call_instrument,
+    list_tools,
+    get_tool,
+    call_tool,
+)
 
 __all__ = [
     # Entity
@@ -111,4 +146,37 @@ __all__ = [
     "DevelopmentalManager",
     "get_dev_manager",
     "TOPIC_TYPE_ASSOCIATIONS",
+    # Instruments - Core classes
+    "InstrumentResult",
+    "Instrument",
+    "InstrumentRegistry",
+    "ToolResult",
+    "Tool",
+    "ToolRegistry",
+    # Instruments - Atomic SSFs
+    "cypher",
+    "create_entity",
+    "get_entity",
+    "create_proxy",
+    "create_agent",
+    "join_community",
+    "add_differentiation_signal",
+    "get_differentiation_signals",
+    "update_life_stage",
+    "set_entity_type",
+    "share_lesson",
+    "record_virtue_activation",
+    # Tools - Collections of instruments
+    "spawn_agent",
+    "develop_agent",
+    "metamorphose_agent",
+    "spawn_offspring",
+    "fuse_agents",
+    # Convenience functions
+    "list_instruments",
+    "get_instrument",
+    "call_instrument",
+    "list_tools",
+    "get_tool",
+    "call_tool",
 ]
