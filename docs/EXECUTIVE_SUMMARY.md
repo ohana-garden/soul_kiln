@@ -42,6 +42,28 @@ Recent enhancements through the Vessels integration bring sophisticated capabili
 
 Hierarchical delegation enables agents to spawn subordinate helpers for complex tasks while maintaining oversight. Behavior adjustment profiles aligned with virtues allow dynamic modification of agent characteristics including caution, creativity, autonomy, and persistence. A task scheduler automates recurring processes like periodic virtue testing and memory consolidation. Together these capabilities create a more robust and manageable agent ecosystem.
 
+## The Community Framework
+
+The most recent evolution of Soul Kiln introduces a community framework embodying the Ubuntu philosophy: "I am, because we are." Communities serve as the organizing principle for agents, with each community representing a collective bound by shared purpose and virtue emphasis.
+
+Communities share everything. Tools developed for one community benefit all. Knowledge flows freely across boundaries. Lessons learned by agents in one domain enrich the collective wisdom available to all. This design reflects the understanding that in an agentic system, cooperation and shared resources create more value than isolation.
+
+The Grant-Getter community serves as the first instantiation of this framework, focused on helping students and nonprofits secure grant funding. Agents within this community cooperate to discover opportunities, write compelling proposals, ensure compliance with funder requirements, and track deadlines. The community emphasizes Service as its core virtue, supported by Truthfulness for honest proposals, Justice for equitable access, and Wisdom for strategic decisions.
+
+Each community defines its own virtue emphasis through cluster and individual modifiers that adjust threshold expectations. Grant-Getter agents face higher standards for service-related virtues while maintaining the universal foundation of trustworthiness. This creates unity in diversity, where different communities can express different virtue priorities while remaining grounded in the same moral foundation.
+
+Communities can grow, shrink, and evolve, but they cannot devolve or become malignant. The virtue attractor system ensures that no matter how a community changes, its agents remain bound by the foundational requirement of trust and the aspirational pull of the broader virtue landscape. Agents always belong to at least one community and remain answerable to their human creators.
+
+## Conversational Agent Creation
+
+Soul Kiln provides a fully conversational experience for creating agents. Rather than filling out forms or running commands, users simply describe what they need in natural language. An intake conversation guides them through understanding their situation, matching them to the right community, gathering relevant context, and creating an agent configured for their specific needs.
+
+The intake process flows naturally: a user might say "I need help getting grants for my nonprofit," and the system recognizes this as a Grant-Getter need. Through conversation, it learns about their organization, mission, target population, and current goals. This context becomes part of the agent's configuration, allowing the new agent to understand and serve them from the first interaction.
+
+When the agent is created, it introduces itself with full awareness of the gathered context. A Grant-Getter agent created for a STEM education nonprofit arrives ready to help find relevant grants, understanding the organization's focus areas and experience level. The handoff is seamless—one moment the user is talking to the intake system, the next they're working with their dedicated agent.
+
+Each community defines markdown-based prompts that shape agent behavior. The main system prompt establishes the agent's identity, values, and capabilities. Tool guidance prompts explain how to use each capability effectively. These prompts can reference the gathered context, allowing truly personalized agent experiences while maintaining the virtue-aligned behavior that Soul Kiln ensures.
+
 ## Collective Learning and Knowledge
 
 Soul Kiln embodies the principle that knowledge belongs to the collective. The shared knowledge pool accumulates lessons from every agent's journey, recording what works, what fails, and why. When an agent achieves a virtue through a particular path, that pathway strengthens for all. When an agent struggles and eventually dissolves, the lessons from that struggle remain available to guide others away from the same pitfalls.
@@ -50,6 +72,6 @@ This design reflects a fundamental belief that alignment is not achieved through
 
 ## Summary
 
-Soul Kiln presents a novel approach to artificial moral development that treats virtues as natural attractors rather than imposed constraints. Through graph-based cognitive dynamics, mercy-based evaluation, two-tier virtue modeling, and collective knowledge sharing, the platform enables agents to grow toward alignment through experience rather than enforcement. The recent Vessels integration adds sophisticated memory, scheduling, and behavioral tools that enhance the platform's capabilities while maintaining its philosophical commitments to trust, mercy, and collective growth.
+Soul Kiln presents a novel approach to artificial moral development that treats virtues as natural attractors rather than imposed constraints. Through graph-based cognitive dynamics, mercy-based evaluation, two-tier virtue modeling, and collective knowledge sharing, the platform enables agents to grow toward alignment through experience rather than enforcement. The Vessels integration adds sophisticated memory, scheduling, and behavioral tools that enhance the platform's capabilities. The Community framework introduces the organizing principle of "I am, because we are," enabling purpose-driven agent collectives like Grant-Getter that share tools, knowledge, and virtue emphases while remaining grounded in the universal moral foundation.
 
-The system demonstrates that artificial agents can develop genuine moral character through the right combination of structure and freedom, judgment and mercy, individual experience and collective wisdom. Trust remains absolute, but everything else allows room for the beautiful imperfection of authentic growth.
+The system demonstrates that artificial agents can develop genuine moral character through the right combination of structure and freedom, judgment and mercy, individual experience and collective wisdom. Communities cannot devolve or become malignant because the virtue attractor system ensures alignment. Trust remains absolute, but everything else allows room for the beautiful imperfection of authentic growth. As each new community joins the ecosystem, it enriches the collective—enhancing the perfection of the whole.
