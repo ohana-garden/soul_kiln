@@ -11,7 +11,7 @@ Provides various agent tools:
 from .code_execution import CodeExecutor, Runtime, ExecutionResult
 from .document_query import DocumentQuery, QueryResult
 from .a2a_chat import A2AChat, ChatMessage, ChatRoom
-from .behavior import BehaviorAdjuster, BehaviorProfile
+from .behavior import BehaviorAdjuster, BehaviorProfile, BehaviorDimension
 
 __all__ = [
     "CodeExecutor",
@@ -24,4 +24,5 @@ __all__ = [
     "ChatRoom",
     "BehaviorAdjuster",
     "BehaviorProfile",
+    "BehaviorDimension",
 ]

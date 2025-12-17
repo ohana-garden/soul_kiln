@@ -356,7 +356,7 @@ class MoralGeometryAnalyzer:
             if self._substrate:
                 # Get edges to this virtue
                 try:
-                    edges = self._substrate.get_edges_to(virtue_id)
+                    edges = self._substrate.get_incoming_edges(virtue_id)
                     for edge in edges:
                         if edge.source_id.startswith("V"):
                             neighboring_virtues.append(edge.source_id)
@@ -556,7 +556,7 @@ class MoralGeometryAnalyzer:
                 )
 
             try:
-                edges = self._substrate.get_edges_from(current)
+                edges = self._substrate.get_outgoing_edges(current)
                 for edge in edges:
                     if edge.target_id not in visited:
                         visited.add(edge.target_id)
@@ -599,7 +599,7 @@ class MoralGeometryAnalyzer:
 
             if self._substrate and current_depth < depth:
                 try:
-                    for edge in self._substrate.get_edges_from(node_id):
+                    for edge in self._substrate.get_outgoing_edges(node_id):
                         edges.append(
                             {
                                 "source": node_id,
