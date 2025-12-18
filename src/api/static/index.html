@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Soul Kiln Theatre</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0a0a0f;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 16px 24px;
+      background: #0f0f23;
+      border-bottom: 1px solid #222;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 500;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      padding: 24px;
+      gap: 24px;
+    }
+
+    #theatre-container {
+      flex: 2;
+      min-height: 500px;
+    }
+
+    .sidebar {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel {
+      background: #1a1a2e;
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .panel h2 {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 12px;
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #333;
+      border-radius: 4px;
+      background: #0f0f23;
+      color: #eee;
+      font-size: 14px;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #4f46e5;
+    }
+
+    button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+
+    .btn-primary {
+      background: #4f46e5;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #4338ca;
+    }
+
+    .btn-danger {
+      background: #dc2626;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #b91c1c;
+    }
+
+    .btn-secondary {
+      background: #333;
+      color: #eee;
+    }
+
+    .btn-secondary:hover {
+      background: #444;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .log {
+      background: #0f0f23;
+      border-radius: 4px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 0.75rem;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .log-entry {
+      margin-bottom: 4px;
+      color: #666;
+    }
+
+    .log-entry.info { color: #60a5fa; }
+    .log-entry.success { color: #4ade80; }
+    .log-entry.error { color: #f87171; }
+
+    .embed-code {
+      background: #0f0f23;
+      border-radius: 4px;
+      padding: 12px;
+      font-family: monospace;
+      font-size: 0.7rem;
+      overflow-x: auto;
+      white-space: pre;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Soul Kiln Theatre</h1>
+  </header>
+
+  <main>
+    <div id="theatre-container"></div>
+
+    <div class="sidebar">
+      <div class="panel">
+        <h2>Connection</h2>
+        <div class="form-group">
+          <label>WebSocket URL</label>
+          <input type="text" id="ws-url" value="ws://localhost:8000/ws">
+        </div>
+        <div class="button-group">
+          <button id="btn-connect" class="btn-primary">Connect</button>
+          <button id="btn-disconnect" class="btn-danger" disabled>Disconnect</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Session</h2>
+        <div class="form-group">
+          <label>Human ID</label>
+          <input type="text" id="human-id" value="demo-user">
+        </div>
+        <div class="form-group">
+          <label>Community (optional)</label>
+          <input type="text" id="community" placeholder="e.g., nonprofit-leaders">
+        </div>
+        <div class="button-group">
+          <button id="btn-start" class="btn-primary" disabled>Start Session</button>
+          <button id="btn-end" class="btn-danger" disabled>End Session</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Event Log</h2>
+        <div id="log" class="log"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Embed Code</h2>
+        <div class="embed-code">&lt;div id="theatre"&gt;&lt;/div&gt;
+&lt;script src="theatre.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+const theatre = new TheatreClient({
+  container: '#theatre'
+});
+theatre.connect('ws://your-server/ws');
+theatre.startSession({
+  humanId: 'user-id'
+});
+&lt;/script&gt;</div>
+      </div>
+    </div>
+  </main>
+
+  <script src="theatre.js"></script>
+  <script>
+    const logEl = document.getElementById('log');
+
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // Initialize theatre client
+    const theatre = new TheatreClient({
+      container: '#theatre-container',
+      onConnect: (data) => {
+        log(`Connected: ${data.connection_id}`, 'success');
+        document.getElementById('btn-connect').disabled = true;
+        document.getElementById('btn-disconnect').disabled = false;
+        document.getElementById('btn-start').disabled = false;
+      },
+      onDisconnect: () => {
+        log('Disconnected', 'error');
+        document.getElementById('btn-connect').disabled = false;
+        document.getElementById('btn-disconnect').disabled = true;
+        document.getElementById('btn-start').disabled = true;
+        document.getElementById('btn-end').disabled = true;
+      },
+      onSessionStart: (data) => {
+        log(`Session started: ${data.session_id}`, 'success');
+        document.getElementById('btn-start').disabled = true;
+        document.getElementById('btn-end').disabled = false;
+      },
+      onSessionEnd: (data) => {
+        log('Session ended', 'info');
+        document.getElementById('btn-start').disabled = false;
+        document.getElementById('btn-end').disabled = true;
+      },
+      onTurn: (turn) => {
+        log(`Turn: ${turn.speaker || 'Unknown'}`, 'info');
+      },
+      onStateChange: (state) => {
+        log(`State: ${state}`, 'info');
+      },
+      onError: (error) => {
+        log(`Error: ${error}`, 'error');
+      }
+    });
+
+    // Wire up buttons
+    document.getElementById('btn-connect').addEventListener('click', () => {
+      const url = document.getElementById('ws-url').value;
+      log(`Connecting to ${url}...`);
+      theatre.connect(url);
+    });
+
+    document.getElementById('btn-disconnect').addEventListener('click', () => {
+      log('Disconnecting...');
+      theatre.disconnect();
+    });
+
+    document.getElementById('btn-start').addEventListener('click', () => {
+      const humanId = document.getElementById('human-id').value;
+      const community = document.getElementById('community').value;
+      log(`Starting session for ${humanId}...`);
+      theatre.startSession({
+        humanId: humanId,
+        community: community || null
+      });
+    });
+
+    document.getElementById('btn-end').addEventListener('click', () => {
+      log('Ending session...');
+      theatre.endSession();
+    });
+  </script>
+</body>
+</html>
