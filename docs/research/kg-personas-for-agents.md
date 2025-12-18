@@ -389,13 +389,76 @@ Community patterns (from `G_cohort`) have different epistemic status than person
 
 ## Implementation Priority
 
-| Priority | Item | Complexity | Impact |
-|----------|------|------------|--------|
-| 1 | PersonaCapsule compiler | Medium | Enables consistent persona conditioning |
-| 2 | StyleRule nodes | Low | Makes tone/format queryable |
-| 3 | Explicit temporal validity | Medium | Better preference lifecycle |
-| 4 | Two-tier retrieval | Medium | Stability + relevance balance |
-| 5 | Persona generation for testing | Low | Better test coverage |
+| Priority | Item | Complexity | Impact | Status |
+|----------|------|------------|--------|--------|
+| 1 | PersonaCapsule compiler | Medium | Enables consistent persona conditioning | **DONE** |
+| 2 | StyleRule nodes | Low | Makes tone/format queryable | **DONE** |
+| 3 | Explicit temporal validity | Medium | Better preference lifecycle | Partial |
+| 4 | Two-tier retrieval | Medium | Stability + relevance balance | Pending |
+| 5 | Persona generation for testing | Low | Better test coverage | Pending |
+| 6 | DiffusionDefiner | Medium | Generate definitions via diffusion | **DONE** |
+
+---
+
+## Implementation Status
+
+### Completed Components
+
+1. **PersonaCapsule** (`src/vessels/persona.py`)
+   - `PersonaCapsule` dataclass with full structure
+   - `PersonaCompiler` for compiling gestalts to capsules
+   - `to_prompt_text()` for LLM-ready output
+   - `to_structured_dict()` for programmatic access
+
+2. **Persona Graph Node Types**
+   - `Trait` - personality traits derived from virtues
+   - `StyleRule` - communication style constraints
+   - `Boundary` - hard constraints (absolute/strong/moderate)
+   - `Preference` - soft preferences with strength and domain
+   - `Role` - community/context roles
+   - `Conflict` - unresolved tensions between facts
+
+3. **DiffusionDefiner** (`src/vessels/diffusion.py`)
+   - `DiffusionDefiner` class for iterative denoising
+   - Persona definition generation conditioned on gestalt
+   - Virtue definition generation with context
+   - Trait/preference generation from virtue patterns
+   - LLM decoder integration (optional)
+   - Definition refinement via re-noising
+
+4. **Graph Schema Updates** (`src/graph/schema.py`)
+   - Indexes for all new node types
+   - `NodeType` enum extended in `src/models.py`
+
+### Usage Example
+
+```python
+from src.vessels import (
+    compile_persona,
+    capsule_to_prompt,
+    define_persona_with_diffusion,
+    define_virtue_with_diffusion,
+    DiffusionDefiner,
+)
+from src.models import Gestalt
+
+# Compile persona from gestalt
+gestalt = ...  # existing gestalt
+capsule = compile_persona(gestalt, task_context="grant application")
+prompt_text = capsule_to_prompt(capsule)
+
+# Generate persona definition via diffusion
+definition = define_persona_with_diffusion(gestalt)
+print(definition.essence)
+print(definition.definition)
+
+# Generate virtue definitions
+virtue_def = define_virtue_with_diffusion("V01", context_gestalt=gestalt)
+
+# Use definer directly for more control
+definer = DiffusionDefiner(num_steps=15, noise_schedule="cosine")
+definitions = definer.define_virtue("V16", related_virtues=["V03", "V07"])
+```
 
 ---
 

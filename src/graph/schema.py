@@ -20,6 +20,14 @@ def init_schema():
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Pathway) ON (n.id)")
     client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Warning) ON (n.id)")
 
+    # Persona graph node indexes (KG-persona pattern)
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Trait) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:StyleRule) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Boundary) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Preference) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Role) ON (n.id)")
+    client.execute("CREATE INDEX IF NOT EXISTS FOR (n:Definition) ON (n.id)")
+
 
 def clear_graph():
     """Delete all nodes and edges. Use carefully."""

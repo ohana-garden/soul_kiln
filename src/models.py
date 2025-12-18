@@ -17,6 +17,13 @@ class NodeType(str, Enum):
     CONCEPT = "concept"
     MEMORY = "memory"
     AGENT = "agent"
+    # Persona graph node types (KG-persona pattern)
+    TRAIT = "trait"
+    STYLE_RULE = "style_rule"
+    BOUNDARY = "boundary"
+    PREFERENCE = "preference"
+    ROLE = "role"
+    DEFINITION = "definition"
 
 
 class EdgeDirection(str, Enum):
