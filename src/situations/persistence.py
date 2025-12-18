@@ -17,6 +17,7 @@ import logging
 from typing import List, Optional
 
 from ..graph.client import get_client
+from ..graph.safe_parse import safe_parse_dict, serialize_for_storage
 from ..models import (
     Situation,
     Stakeholder,
@@ -56,7 +57,7 @@ def save_situation(situation: Situation) -> str:
             "id": situation.id,
             "name": situation.name,
             "description": situation.description,
-            "constraints": str(situation.constraints),
+            "constraints": serialize_for_storage(situation.constraints),
         }
     )
 
@@ -169,11 +170,8 @@ def load_situation(situation_id: str) -> Optional[Situation]:
 
     name, description, constraints_str = result[0]
 
-    # Parse constraints
-    try:
-        constraints = eval(constraints_str) if constraints_str else {}
-    except Exception:
-        constraints = {}
+    # Parse constraints safely (no eval)
+    constraints = safe_parse_dict(constraints_str)
 
     # Get stakeholders
     sh_result = client.query(

@@ -24,16 +24,37 @@ classifiers = [
 ]
 
 dependencies = [
+    # Graph database
     "falkordb>=1.0.0",
     "graphiti-core>=0.5.0",
+    "redis>=5.0.0",
+    # Core utilities
     "numpy>=1.24.0",
+    "networkx>=3.0",
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
-    "redis>=5.0.0",
-    "networkx>=3.0",
+    # CLI
+    "click>=8.0.0",
+    # Configuration
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
+# LLM integration (optional for core functionality)
+llm = [
+    "anthropic>=0.18.0",
+]
+# Server / WebSocket support
+server = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "websockets>=11.0.0",
+]
+# Full installation (all optional features)
+all = [
+    "virtue-basin-simulator[llm,server]",
+]
+# Development tools
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -44,6 +65,9 @@ dev = [
 ]
 
 [project.scripts]
+# Main CLI
+soul-kiln = "src.main:cli"
+# Utility scripts
 vbs-init = "scripts.init_db:main"
 vbs-evolve = "scripts.run_evolution:main"
 vbs-export = "scripts.export_template:main"

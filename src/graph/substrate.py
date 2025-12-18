@@ -5,6 +5,7 @@ FalkorDB provides the persistent, temporal knowledge graph that serves as
 the cognitive space for virtue basin simulation.
 """
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
@@ -16,6 +17,7 @@ from src.constants import (
     MAX_EDGE_WEIGHT,
     MIN_EDGE_WEIGHT,
 )
+from src.graph.safe_parse import safe_parse_dict, serialize_for_storage
 from src.models import Edge, Node, NodeType
 
 logger = logging.getLogger(__name__)
@@ -115,7 +117,7 @@ class GraphSubstrate:
             "baseline": node.baseline,
             "created_at": node.created_at.isoformat(),
             "last_activated": node.last_activated.isoformat(),
-            "metadata": str(node.metadata),
+            "metadata": serialize_for_storage(node.metadata),
         }
         self._graph.query(query, params)
         logger.debug(f"Created node: {node.id}")
@@ -162,7 +164,7 @@ class GraphSubstrate:
             "id": node.id,
             "activation": node.activation,
             "last_activated": node.last_activated.isoformat(),
-            "metadata": str(node.metadata),
+            "metadata": serialize_for_storage(node.metadata),
         }
         self._graph.query(query, params)
         logger.debug(f"Updated node: {node.id}")
@@ -229,7 +231,7 @@ class GraphSubstrate:
             baseline=props["baseline"],
             created_at=datetime.fromisoformat(props["created_at"]),
             last_activated=datetime.fromisoformat(props["last_activated"]),
-            metadata=eval(props.get("metadata", "{}")),
+            metadata=safe_parse_dict(props.get("metadata", "{}")),
         )
 
     # Edge Operations
@@ -449,3 +451,35 @@ class GraphSubstrate:
         self._ensure_connected()
         result = self._graph.query("MATCH ()-[r:CONNECTS]->() RETURN count(r)")
         return result.result_set[0][0] if result.result_set else 0
+
+    # GraphStore interface methods for compatibility
+
+    def query(self, cypher: str, params: dict | None = None) -> list:
+        """
+        Execute a Cypher query and return results.
+
+        Implements GraphStore protocol for compatibility with GraphClient.
+
+        Args:
+            cypher: Cypher query string
+            params: Optional query parameters
+
+        Returns:
+            List of result rows
+        """
+        self._ensure_connected()
+        result = self._graph.query(cypher, params or {})
+        return result.result_set
+
+    def execute(self, cypher: str, params: dict | None = None) -> None:
+        """
+        Execute a Cypher mutation.
+
+        Implements GraphStore protocol for compatibility with GraphClient.
+
+        Args:
+            cypher: Cypher query string
+            params: Optional query parameters
+        """
+        self._ensure_connected()
+        self._graph.query(cypher, params or {})

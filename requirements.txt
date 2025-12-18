@@ -1,8 +1,16 @@
-falkordb==1.0.4
-redis==5.0.1
-pyyaml==6.0.1
-numpy==1.26.0
-click==8.1.7
-anthropic==0.18.1
-python-dotenv==1.0.0
-pytest==8.0.0
+# Auto-generated from pyproject.toml - do not edit manually
+# Install from pyproject.toml using: pip install -e .
+# Or with optional dependencies: pip install -e ".[dev]" or pip install -e ".[all]"
+#
+# This file exists for backwards compatibility with tools that require requirements.txt
+
+# Core dependencies (from pyproject.toml)
+falkordb>=1.0.0
+graphiti-core>=0.5.0
+redis>=5.0.0
+numpy>=1.24.0
+networkx>=3.0
+pyyaml>=6.0
+pydantic>=2.0.0
+click>=8.0.0
+python-dotenv>=1.0.0

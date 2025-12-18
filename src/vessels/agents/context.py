@@ -229,7 +229,7 @@ class AgentContext:
             self.deferred_tasks.append(task)
             return task.id
 
-    def execute_ready_tasks(self) -> list[DeferredTask]:
+    def execute_ready_tasks(self) -> list[ContextTask]:
         """Execute and return tasks that are ready."""
         with self._lock:
             ready = []
