@@ -56,11 +56,14 @@ class TestGraphitiMemoryUnit:
     """Unit tests for GraphitiMemory (mocked backend)."""
 
     def test_initialization_defaults(self):
-        """Test default initialization."""
-        memory = GraphitiMemory()
+        """Test default initialization uses smart defaults."""
+        from src.vessels.memory.graphiti_memory import get_falkordb_defaults
 
-        assert memory._host == "localhost"
-        assert memory._port == 6379
+        memory = GraphitiMemory()
+        expected_host, expected_port = get_falkordb_defaults()
+
+        assert memory._host == expected_host
+        assert memory._port == expected_port
         assert memory._database == "soul_kiln_memory"
         assert not memory._initialized
 
@@ -69,7 +72,7 @@ class TestGraphitiMemoryUnit:
         with patch.dict(os.environ, {
             "FALKORDB_HOST": "graphiti.example.com",
             "FALKORDB_PORT": "16379",
-        }):
+        }, clear=False):
             memory = GraphitiMemory()
 
             assert memory._host == "graphiti.example.com"

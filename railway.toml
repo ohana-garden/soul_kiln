@@ -1,0 +1,14 @@
+# Railway configuration for soul-kiln main application
+# https://docs.railway.com/reference/config-as-code
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "python -m src.main serve"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+numReplicas = 1
+
+[service]
+name = "soul-kiln"
