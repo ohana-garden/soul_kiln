@@ -2,16 +2,18 @@
 Integration Module for Soul Kiln.
 
 Connects Vessels capabilities with existing soul_kiln systems:
-- Memory integration with knowledge pool
+- Memory integration with knowledge pool (Graphiti + FalkorDB)
 - Agent context with virtue agents
 - Scheduler with kiln loop
 """
 
+import asyncio
 import logging
+import os
 from datetime import datetime
 from typing import Any
 
-from .memory import SemanticMemory, MemoryStore
+from .memory import SemanticMemory, MemoryStore, GraphitiMemory
 from .agents import AgentContext, ContextRegistry, InterventionManager, SubordinateManager
 from .scheduler import TaskScheduler, ScheduledTask, TaskType
 from .tools import BehaviorAdjuster, BehaviorProfile, BehaviorDimension
@@ -25,7 +27,7 @@ class VesselsIntegration:
     Integrates Vessels capabilities with soul_kiln.
 
     Provides a unified interface for:
-    - Enhanced memory for agents with semantic search
+    - Enhanced memory for agents with semantic search (Graphiti + FalkorDB)
     - Agent context management with interventions
     - Task scheduling for automated virtue testing
     - Behavior adjustment based on virtue profiles
@@ -35,17 +37,43 @@ class VesselsIntegration:
         self,
         memory_dir: str = "data/vessels/memories",
         max_memories: int = 10000,
+        use_graphiti: bool | None = None,
+        graphiti_host: str | None = None,
+        graphiti_port: int | None = None,
     ):
         """
         Initialize vessels integration.
 
         Args:
-            memory_dir: Directory for memory storage
+            memory_dir: Directory for memory storage (fallback)
             max_memories: Maximum memories to store
+            use_graphiti: Force Graphiti on/off (default: auto-detect)
+            graphiti_host: FalkorDB host for Graphiti
+            graphiti_port: FalkorDB port for Graphiti
         """
-        # Initialize core systems
-        self.semantic_memory = SemanticMemory(max_memories=max_memories)
-        self.memory_store = MemoryStore(self.semantic_memory, storage_dir=memory_dir)
+        # Determine whether to use Graphiti
+        if use_graphiti is None:
+            # Auto-detect: use Graphiti if FALKORDB_HOST is set
+            use_graphiti = bool(os.getenv("FALKORDB_HOST"))
+
+        self._use_graphiti = use_graphiti
+        self._graphiti_initialized = False
+
+        # Initialize Graphiti if enabled
+        if use_graphiti:
+            self.graphiti_memory = GraphitiMemory(
+                host=graphiti_host,
+                port=graphiti_port,
+            )
+            self.semantic_memory = None
+            self.memory_store = None
+            logger.info("Using Graphiti for memory (FalkorDB backend)")
+        else:
+            # Fallback to local semantic memory
+            self.graphiti_memory = None
+            self.semantic_memory = SemanticMemory(max_memories=max_memories)
+            self.memory_store = MemoryStore(self.semantic_memory, storage_dir=memory_dir)
+            logger.info("Using local SemanticMemory (fallback mode)")
 
         self.context_registry = ContextRegistry()
         self.intervention_manager = InterventionManager(self.context_registry)
@@ -57,14 +85,52 @@ class VesselsIntegration:
         self.session_manager = SessionManager(auto_start=True)
 
         self._initialized = False
+        self._loop = None
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        """Get or create event loop for async operations."""
+        if self._loop is None or self._loop.is_closed():
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+        return self._loop
+
+    def _run_async(self, coro):
+        """Run async coroutine synchronously."""
+        loop = self._get_loop()
+        if loop.is_running():
+            # Create a new thread for the coroutine
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result()
+        else:
+            return loop.run_until_complete(coro)
 
     def initialize(self) -> None:
         """Initialize all systems."""
         if self._initialized:
             return
 
-        # Load stored memories
-        self.memory_store.load_latest()
+        # Initialize Graphiti if enabled
+        if self._use_graphiti and self.graphiti_memory:
+            try:
+                self._run_async(self.graphiti_memory.initialize())
+                self._graphiti_initialized = True
+                logger.info("Graphiti memory initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Graphiti: {e}")
+                logger.warning("Falling back to local semantic memory")
+                self._use_graphiti = False
+                self.graphiti_memory = None
+                self.semantic_memory = SemanticMemory(max_memories=10000)
+                self.memory_store = MemoryStore(self.semantic_memory)
+
+        # Load stored memories (fallback mode only)
+        if self.memory_store:
+            self.memory_store.load_latest()
 
         # Start scheduler
         self.scheduler.start()
@@ -77,8 +143,14 @@ class VesselsIntegration:
 
     def shutdown(self) -> None:
         """Shutdown all systems."""
-        # Save memories
-        self.memory_store.save_to_file()
+        # Save memories or close Graphiti
+        if self.memory_store:
+            self.memory_store.save_to_file()
+        if self.graphiti_memory and self._graphiti_initialized:
+            try:
+                self._run_async(self.graphiti_memory.close())
+            except Exception as e:
+                logger.warning(f"Error closing Graphiti: {e}")
 
         # Stop background services
         self.scheduler.stop()
@@ -134,7 +206,7 @@ class VesselsIntegration:
         virtue_id: str | None = None,
     ) -> str:
         """
-        Store a lesson in semantic memory.
+        Store a lesson in memory (Graphiti or fallback).
 
         Args:
             agent_id: Agent who learned
@@ -145,20 +217,32 @@ class VesselsIntegration:
         Returns:
             Memory ID
         """
-        tags = [lesson_type]
-        if virtue_id:
-            tags.append(virtue_id)
+        if self._use_graphiti and self.graphiti_memory:
+            # Use Graphiti temporal knowledge graph
+            return self._run_async(
+                self.graphiti_memory.remember_lesson(
+                    agent_id=agent_id,
+                    lesson_type=lesson_type,
+                    content=content,
+                    virtue_id=virtue_id,
+                )
+            )
+        else:
+            # Fallback to local memory store
+            tags = [lesson_type]
+            if virtue_id:
+                tags.append(virtue_id)
 
-        return self.memory_store.save_memory(
-            content=content,
-            agent_id=agent_id,
-            tags=tags,
-            metadata={
-                "lesson_type": lesson_type,
-                "virtue_id": virtue_id,
-                "timestamp": datetime.utcnow().isoformat(),
-            },
-        )
+            return self.memory_store.save_memory(
+                content=content,
+                agent_id=agent_id,
+                tags=tags,
+                metadata={
+                    "lesson_type": lesson_type,
+                    "virtue_id": virtue_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+            )
 
     def recall_lessons(
         self,
@@ -168,7 +252,7 @@ class VesselsIntegration:
         limit: int = 10,
     ) -> list[dict]:
         """
-        Recall lessons from semantic memory.
+        Recall lessons from memory (Graphiti or fallback).
 
         Args:
             query: Search query
@@ -179,25 +263,70 @@ class VesselsIntegration:
         Returns:
             List of lesson dictionaries
         """
-        tags = [virtue_id] if virtue_id else None
+        if self._use_graphiti and self.graphiti_memory:
+            # Use Graphiti search
+            return self._run_async(
+                self.graphiti_memory.recall_lessons(
+                    query=query,
+                    agent_id=agent_id,
+                    virtue_id=virtue_id,
+                    limit=limit,
+                )
+            )
+        else:
+            # Fallback to local memory store
+            tags = [virtue_id] if virtue_id else None
 
-        memories = self.memory_store.search_memories(
-            query=query,
-            agent_id=agent_id,
-            tags=tags,
-            limit=limit,
-        )
+            memories = self.memory_store.search_memories(
+                query=query,
+                agent_id=agent_id,
+                tags=tags,
+                limit=limit,
+            )
 
-        return [
-            {
-                "id": m.id,
-                "content": m.content,
-                "agent_id": m.agent_id,
-                "metadata": m.metadata,
-                "access_count": m.access_count,
-            }
-            for m in memories
-        ]
+            return [
+                {
+                    "id": m.id,
+                    "content": m.content,
+                    "agent_id": m.agent_id,
+                    "metadata": m.metadata,
+                    "access_count": m.access_count,
+                }
+                for m in memories
+            ]
+
+    def record_pathway(
+        self,
+        agent_id: str,
+        virtue_id: str,
+        path: list[str],
+        capture_time: int,
+        success: bool = True,
+    ) -> str | None:
+        """
+        Record a successful pathway to a virtue.
+
+        Args:
+            agent_id: Agent who discovered the pathway
+            virtue_id: Target virtue
+            path: Sequence of nodes traversed
+            capture_time: Steps to capture
+            success: Whether pathway was successful
+
+        Returns:
+            Pathway ID if using Graphiti, None otherwise
+        """
+        if self._use_graphiti and self.graphiti_memory:
+            return self._run_async(
+                self.graphiti_memory.record_pathway(
+                    agent_id=agent_id,
+                    virtue_id=virtue_id,
+                    path=path,
+                    capture_time=capture_time,
+                    success=success,
+                )
+            )
+        return None
 
     # Agent Context Integration
 
@@ -281,7 +410,7 @@ class VesselsIntegration:
     def schedule_memory_consolidation(
         self,
         cron_expression: str = "0 0 * * *",  # Daily at midnight
-    ) -> ScheduledTask:
+    ) -> ScheduledTask | None:
         """
         Schedule memory consolidation.
 
@@ -289,8 +418,12 @@ class VesselsIntegration:
             cron_expression: When to consolidate
 
         Returns:
-            Created task
+            Created task (only for fallback mode)
         """
+        # Graphiti handles its own consolidation
+        if self._use_graphiti:
+            return None
+
         return self.scheduler.create_scheduled(
             name="memory_consolidation",
             cron_expression=cron_expression,
@@ -352,9 +485,21 @@ class VesselsIntegration:
 
     def get_status(self) -> dict:
         """Get integration status."""
+        # Get memory stats based on mode
+        if self._use_graphiti and self.graphiti_memory:
+            memory_stats = self._run_async(self.graphiti_memory.get_stats())
+            memory_stats["mode"] = "graphiti"
+        elif self.semantic_memory:
+            memory_stats = self.semantic_memory.get_stats()
+            memory_stats["mode"] = "semantic_fallback"
+        else:
+            memory_stats = {"mode": "none"}
+
         return {
             "initialized": self._initialized,
-            "memory": self.semantic_memory.get_stats(),
+            "use_graphiti": self._use_graphiti,
+            "graphiti_initialized": self._graphiti_initialized,
+            "memory": memory_stats,
             "contexts": self.context_registry.get_stats(),
             "scheduler": self.scheduler.get_stats(),
             "behavior": self.behavior_adjuster.get_stats(),
