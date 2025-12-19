@@ -156,7 +156,8 @@ async def init_graphiti():
 
     except Exception as e:
         logger.error(f"Failed to initialize Graphiti: {e}")
-        raise
+        logger.warning("Running in degraded mode - Graphiti not available")
+        # Don't raise - allow app to start in degraded mode
 
 
 async def close_graphiti():
