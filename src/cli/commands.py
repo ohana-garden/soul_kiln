@@ -1039,3 +1039,36 @@ def list_saved():
     for sit in saved:
         click.echo(f"  {sit['id']}: {sit['name']}")
         click.echo(f"    {sit['stakeholder_count']} stakeholders, {sit['resource_count']} resources")
+
+
+# ============================================================================
+# SERVER COMMANDS - HTTP API for Railway deployment
+# ============================================================================
+
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", help="Host to bind to")
+@click.option("--port", default=8080, envvar="PORT", help="Port to bind to")
+@click.option("--reload", is_flag=True, help="Enable auto-reload for development")
+def serve(host, port, reload):
+    """Start the HTTP API server for Railway deployment."""
+    import os
+
+    click.echo(f"Starting Soul Kiln server on {host}:{port}")
+    click.echo("Press Ctrl+C to stop")
+
+    try:
+        import uvicorn
+        from ..api.server import create_app
+
+        # Initialize schema and virtues
+        init_schema()
+        init_virtues()
+
+        app = create_app()
+        uvicorn.run(app, host=host, port=port, reload=reload)
+
+    except ImportError as e:
+        click.echo(f"Error: Missing dependency - {e}")
+        click.echo("Install with: pip install uvicorn fastapi")
+        raise SystemExit(1)
