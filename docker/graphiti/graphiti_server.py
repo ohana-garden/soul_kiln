@@ -23,6 +23,35 @@ logger = logging.getLogger(__name__)
 graphiti_client = None
 
 
+def get_falkordb_defaults() -> tuple[str, int]:
+    """
+    Get FalkorDB connection defaults with smart environment detection.
+
+    Priority:
+    1. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
+    2. Railway environment (uses service name)
+    3. Docker environment (uses service name)
+    4. Local development (localhost)
+    """
+    if os.getenv("FALKORDB_HOST"):
+        return (
+            os.getenv("FALKORDB_HOST"),
+            int(os.getenv("FALKORDB_PORT", "6379")),
+        )
+
+    if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME"):
+        return ("falkordb.railway.internal", 6379)
+
+    if (
+        os.path.exists("/.dockerenv")
+        or os.getenv("DOCKER_CONTAINER")
+        or os.path.exists("/run/.containerenv")
+    ):
+        return ("falkordb", 6379)
+
+    return ("localhost", 6379)
+
+
 class EpisodeRequest(BaseModel):
     """Request to add an episode."""
 
@@ -109,8 +138,7 @@ async def init_graphiti():
         from graphiti_core import Graphiti
         from graphiti_core.driver.falkordb_driver import FalkorDriver
 
-        host = os.getenv("FALKORDB_HOST", "localhost")
-        port = int(os.getenv("FALKORDB_PORT", "6379"))
+        host, port = get_falkordb_defaults()
         database = os.getenv("GRAPHITI_DATABASE", "soul_kiln_memory")
 
         logger.info(f"Initializing Graphiti with FalkorDB at {host}:{port}/{database}")
@@ -165,11 +193,12 @@ app = FastAPI(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Check server health."""
+    host, port = get_falkordb_defaults()
     return HealthResponse(
         status="healthy" if graphiti_client else "degraded",
         graphiti_initialized=graphiti_client is not None,
-        falkordb_host=os.getenv("FALKORDB_HOST", "localhost"),
-        falkordb_port=int(os.getenv("FALKORDB_PORT", "6379")),
+        falkordb_host=host,
+        falkordb_port=port,
         database=os.getenv("GRAPHITI_DATABASE", "soul_kiln_memory"),
     )
 

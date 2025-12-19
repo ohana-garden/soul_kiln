@@ -15,6 +15,44 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def get_falkordb_defaults() -> tuple[str, int]:
+    """
+    Get FalkorDB connection defaults with smart environment detection.
+
+    Priority:
+    1. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
+    2. Railway environment (uses service name)
+    3. Docker environment (uses service name)
+    4. Local development (localhost)
+
+    Returns:
+        Tuple of (host, port)
+    """
+    # Check explicit env vars first
+    if os.getenv("FALKORDB_HOST"):
+        return (
+            os.getenv("FALKORDB_HOST"),
+            int(os.getenv("FALKORDB_PORT", "6379")),
+        )
+
+    # Detect Railway environment
+    if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME"):
+        # Railway uses internal DNS: <service>.railway.internal
+        return ("falkordb.railway.internal", 6379)
+
+    # Detect Docker environment (check for Docker-specific files/env)
+    if (
+        os.path.exists("/.dockerenv")
+        or os.getenv("DOCKER_CONTAINER")
+        or os.path.exists("/run/.containerenv")
+    ):
+        # Docker uses service name from docker-compose
+        return ("falkordb", 6379)
+
+    # Local development
+    return ("localhost", 6379)
+
+
 @dataclass
 class Episode:
     """A single episodic memory entry."""
@@ -65,12 +103,19 @@ class GraphitiMemory:
         Initialize Graphiti memory with FalkorDB backend.
 
         Args:
-            host: FalkorDB host (default: FALKORDB_HOST env or localhost)
-            port: FalkorDB port (default: FALKORDB_PORT env or 6379)
+            host: FalkorDB host (default: auto-detected based on environment)
+            port: FalkorDB port (default: auto-detected based on environment)
             database: Graph database name
+
+        Environment detection priority:
+            1. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
+            2. Railway (falkordb.railway.internal:6379)
+            3. Docker (falkordb:6379)
+            4. Local (localhost:6379)
         """
-        self._host = host or os.getenv("FALKORDB_HOST", "localhost")
-        self._port = port or int(os.getenv("FALKORDB_PORT", "6379"))
+        default_host, default_port = get_falkordb_defaults()
+        self._host = host or default_host
+        self._port = port or default_port
         self._database = database
         self._graphiti = None
         self._driver = None
