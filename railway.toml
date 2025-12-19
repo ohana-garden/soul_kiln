@@ -3,10 +3,8 @@
 
 [build]
 builder = "NIXPACKS"
-buildCommand = "pip install -e ."
 
 [deploy]
-startCommand = "python -m src.main serve"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 numReplicas = 1
