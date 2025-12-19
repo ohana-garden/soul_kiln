@@ -1,13 +1,62 @@
 version: '3.8'
+
 services:
   falkordb:
     image: falkordb/falkordb:latest
+    container_name: soul_kiln_falkordb
     ports:
       - "6379:6379"
     volumes:
       - falkordb_data:/data
-    command: >
-      --loadmodule /usr/lib/redis/modules/falkordb.so
+    environment:
+      - FALKORDB_ARGS=--timeout 0
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  graphiti:
+    build:
+      context: ./docker/graphiti
+      dockerfile: Dockerfile
+    container_name: soul_kiln_graphiti
+    ports:
+      - "8000:8000"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - GRAPHITI_DATABASE=soul_kiln_memory
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  soul-kiln:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: soul_kiln_app
+    ports:
+      - "8080:8080"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - GRAPHITI_URL=http://graphiti:8000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./config:/app/config:ro
+      - ./output:/app/output
+    depends_on:
+      - graphiti
+      - falkordb
+    restart: unless-stopped
 
 volumes:
   falkordb_data:

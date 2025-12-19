@@ -25,12 +25,15 @@ classifiers = [
 
 dependencies = [
     "falkordb>=1.0.0",
-    "graphiti-core>=0.5.0",
+    "graphiti-core[falkordb,anthropic]>=0.5.0",
     "numpy>=1.24.0",
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "redis>=5.0.0",
     "networkx>=3.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "httpx>=0.25.0",
 ]
 
 [project.optional-dependencies]

@@ -3,7 +3,7 @@ version: '3.8'
 services:
   falkordb:
     image: falkordb/falkordb:latest
-    container_name: virtue_basin_falkordb
+    container_name: soul_kiln_falkordb
     ports:
       - "6379:6379"
     volumes:
@@ -17,17 +17,44 @@ services:
       retries: 5
     restart: unless-stopped
 
+  graphiti:
+    build:
+      context: ./graphiti
+      dockerfile: Dockerfile
+    container_name: soul_kiln_graphiti
+    ports:
+      - "8000:8000"
+    environment:
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - GRAPHITI_DATABASE=soul_kiln_memory
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
   simulator:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: virtue_basin_simulator
+    container_name: soul_kiln_simulator
+    ports:
+      - "8080:8080"
     depends_on:
+      graphiti:
+        condition: service_healthy
       falkordb:
         condition: service_healthy
     environment:
       - FALKORDB_HOST=falkordb
       - FALKORDB_PORT=6379
+      - GRAPHITI_URL=http://graphiti:8000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - ../config:/app/config:ro
       - ../output:/app/output
