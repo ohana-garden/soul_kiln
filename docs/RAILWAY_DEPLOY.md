@@ -1,6 +1,16 @@
 # Railway Deployment Guide
 
-Deploy Soul Kiln to Railway with FalkorDB and Graphiti.
+Deploy Soul Kiln to Railway with FalkorDB.
+
+## Architecture
+
+Soul Kiln uses graphiti-core as a library to connect directly to FalkorDB:
+
+```
+FalkorDB (graph database)
+    ↓
+Soul-Kiln (uses graphiti-core library)
+```
 
 ## Prerequisites
 
@@ -8,7 +18,7 @@ Deploy Soul Kiln to Railway with FalkorDB and Graphiti.
 - GitHub repo connected to Railway
 - Anthropic API key
 
-## Quick Deploy (3 Services)
+## Quick Deploy (2 Services)
 
 ### Step 1: Create Railway Project
 
@@ -29,22 +39,7 @@ Deploy Soul Kiln to Railway with FalkorDB and Graphiti.
 7. Go to **Volumes** → **Add Volume**:
    - Mount path: `/data`
 
-### Step 3: Add Graphiti Service
-
-1. Click **"+ New"** → **"GitHub Repo"**
-2. Select your repo
-3. Go to **Settings** → **Build**:
-   - Root Directory: `docker/graphiti`
-4. Go to **Settings** → **Variables**:
-   ```
-   FALKORDB_HOST=falkordb.railway.internal
-   FALKORDB_PORT=6379
-   GRAPHITI_DATABASE=soul_kiln_memory
-   ```
-5. Go to **Settings** → **Networking**:
-   - Add internal port: `8000`
-
-### Step 4: Configure Soul-Kiln Service
+### Step 3: Configure Soul-Kiln Service
 
 1. Click on the main service (deployed from root)
 2. Go to **Settings** → **Variables**:
@@ -66,14 +61,6 @@ Deploy Soul Kiln to Railway with FalkorDB and Graphiti.
 | `FALKORDB_HOST` | Auto | FalkorDB hostname (auto: falkordb.railway.internal) |
 | `FALKORDB_PORT` | Auto | FalkorDB port (default: 6379) |
 | `PORT` | Auto | Railway injects this automatically |
-
-### Graphiti Service
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `FALKORDB_HOST` | Yes | Set to `falkordb.railway.internal` |
-| `FALKORDB_PORT` | Yes | Set to `6379` |
-| `GRAPHITI_DATABASE` | No | Database name (default: soul_kiln_memory) |
 
 ### FalkorDB Service
 
@@ -110,25 +97,24 @@ After all services are running:
 ### Service won't start
 - Check logs in Railway dashboard
 - Verify all environment variables are set
-- Ensure FalkorDB is healthy before Graphiti starts
+- Ensure FalkorDB is healthy first
 
 ### Health check failing
 - FalkorDB may still be initializing
 - Check internal networking is configured
 - Verify port 6379 is exposed internally
 
-### Graphiti connection issues
+### FalkorDB connection issues
 - Confirm `FALKORDB_HOST=falkordb.railway.internal`
 - Check FalkorDB service is named exactly `falkordb`
+- Ensure internal port 6379 is configured
 
 ## Service Dependencies
 
 ```
 FalkorDB (must start first)
     ↓
-Graphiti (depends on FalkorDB)
-    ↓
-Soul-Kiln (depends on FalkorDB)
+Soul-Kiln (uses graphiti-core library to connect to FalkorDB)
 ```
 
 Railway handles this automatically if services are properly configured.
