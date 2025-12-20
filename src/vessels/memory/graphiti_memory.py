@@ -20,25 +20,40 @@ def get_falkordb_defaults() -> tuple[str, int]:
     Get FalkorDB connection defaults with smart environment detection.
 
     Priority:
-    1. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
-    2. Railway environment (uses service name)
-    3. Docker environment (uses service name)
-    4. Local development (localhost)
+    1. FALKORDB_URL (Railway provides this via reference variable)
+    2. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
+    3. Railway environment (falkordb.railway.internal:16379)
+    4. Docker environment (falkordb:6379)
+    5. Local development (localhost:6379)
 
     Returns:
         Tuple of (host, port)
     """
-    # Check explicit env vars first
+    # Check for Railway-style URL first (e.g., redis://default:pass@host:port)
+    falkordb_url = os.getenv("FALKORDB_URL") or os.getenv("FALKORDB_PRIVATE_URL")
+    if falkordb_url:
+        # Parse URL to extract host and port
+        # Format: redis://default:password@host:port
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(falkordb_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 16379
+            return (host, port)
+        except Exception:
+            pass
+
+    # Check explicit env vars
     if os.getenv("FALKORDB_HOST"):
         return (
             os.getenv("FALKORDB_HOST"),
             int(os.getenv("FALKORDB_PORT", "6379")),
         )
 
-    # Detect Railway environment
+    # Detect Railway environment - uses port 16379
     if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME"):
         # Railway uses internal DNS: <service>.railway.internal
-        return ("falkordb.railway.internal", 6379)
+        return ("falkordb.railway.internal", 16379)
 
     # Detect Docker environment (check for Docker-specific files/env)
     if (

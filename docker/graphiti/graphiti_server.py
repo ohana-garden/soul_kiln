@@ -30,11 +30,24 @@ def get_falkordb_defaults() -> tuple[str, int]:
     Get FalkorDB connection defaults with smart environment detection.
 
     Priority:
-    1. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
-    2. Railway environment (uses service name)
-    3. Docker environment (uses service name)
-    4. Local development (localhost)
+    1. FALKORDB_URL (Railway provides this via reference variable)
+    2. Explicit env vars (FALKORDB_HOST, FALKORDB_PORT)
+    3. Railway environment (falkordb.railway.internal:16379)
+    4. Docker environment (falkordb:6379)
+    5. Local development (localhost:6379)
     """
+    # Check for Railway-style URL first
+    falkordb_url = os.getenv("FALKORDB_URL") or os.getenv("FALKORDB_PRIVATE_URL")
+    if falkordb_url:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(falkordb_url)
+            host = parsed.hostname or "localhost"
+            port = parsed.port or 16379
+            return (host, port)
+        except Exception:
+            pass
+
     if os.getenv("FALKORDB_HOST"):
         return (
             os.getenv("FALKORDB_HOST"),
@@ -42,7 +55,7 @@ def get_falkordb_defaults() -> tuple[str, int]:
         )
 
     if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_SERVICE_NAME"):
-        return ("falkordb.railway.internal", 6379)
+        return ("falkordb.railway.internal", 16379)
 
     if (
         os.path.exists("/.dockerenv")
