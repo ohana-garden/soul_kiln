@@ -98,14 +98,11 @@ def create_app() -> FastAPI:
         except Exception as e:
             components["graph"] = {"status": "unhealthy", "error": str(e)}
 
-        # Check Graphiti (if enabled)
-        if _integration and _integration._use_graphiti:
-            if _integration._graphiti_initialized:
-                components["graphiti"] = {"status": "healthy"}
-            else:
-                components["graphiti"] = {"status": "initializing"}
+        # Check Graphiti (required component)
+        if _integration and _integration._graphiti_initialized:
+            components["graphiti"] = {"status": "healthy"}
         else:
-            components["graphiti"] = {"status": "disabled"}
+            components["graphiti"] = {"status": "unhealthy", "error": "Graphiti not initialized"}
 
         # Check vessels integration
         if _integration and _integration._initialized:
@@ -154,7 +151,6 @@ def create_app() -> FastAPI:
         if _integration:
             vessels_stats = {
                 "initialized": _integration._initialized,
-                "use_graphiti": _integration._use_graphiti,
                 "graphiti_initialized": _integration._graphiti_initialized,
             }
         else:
