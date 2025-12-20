@@ -8,27 +8,38 @@ class GraphClient:
     """Client for FalkorDB graph database."""
 
     def __init__(self, config_path: str = None):
-        if config_path is None:
-            # Look for config.yml relative to this file or in working directory
-            possible_paths = [
-                "config.yml",
-                os.path.join(os.path.dirname(__file__), "..", "..", "config.yml"),
-            ]
-            for path in possible_paths:
-                if os.path.exists(path):
-                    config_path = path
-                    break
-            else:
-                config_path = "config.yml"
+        # Try environment variables first (for Railway/Docker deployment)
+        host = os.getenv("FALKORDB_HOST") or os.getenv("REDIS_HOST")
+        port = os.getenv("FALKORDB_PORT") or os.getenv("REDIS_PORT")
+        graph_name = os.getenv("FALKORDB_GRAPH", "soul_kiln")
 
-        with open(config_path) as f:
-            config = yaml.safe_load(f)
+        if host and port:
+            # Use environment variables
+            self.db = FalkorDB(host=host, port=int(port))
+            self.graph = self.db.select_graph(graph_name)
+        else:
+            # Fall back to config file
+            if config_path is None:
+                # Look for config.yml relative to this file or in working directory
+                possible_paths = [
+                    "config.yml",
+                    os.path.join(os.path.dirname(__file__), "..", "..", "config.yml"),
+                ]
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        config_path = path
+                        break
+                else:
+                    config_path = "config.yml"
 
-        self.db = FalkorDB(
-            host=config["graph"]["host"],
-            port=config["graph"]["port"]
-        )
-        self.graph = self.db.select_graph(config["graph"]["name"])
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+
+            self.db = FalkorDB(
+                host=config["graph"]["host"],
+                port=config["graph"]["port"]
+            )
+            self.graph = self.db.select_graph(config["graph"]["name"])
 
     def query(self, cypher: str, params: dict = None) -> list:
         """Execute Cypher query, return results."""
