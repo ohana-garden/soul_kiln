@@ -3,6 +3,8 @@ Graphiti API Server.
 
 FastAPI server that provides a REST interface to Graphiti
 with FalkorDB backend for Soul Kiln memory operations.
+
+Version: 1.0.1 - Fixed startup to not crash if FalkorDB unavailable
 """
 
 import asyncio
